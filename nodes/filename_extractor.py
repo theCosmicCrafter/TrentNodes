@@ -29,6 +29,8 @@ class FilenameExtractor:
     
     FUNCTION = "extract_filename"
     CATEGORY = "Trent/Utilities"
+    BACKGROUND_COLOR = "#0a1218"  # Dark background
+    FOREGROUND_COLOR = "#0c1b21"  # Darker teal
     
     def extract_filename(self, filename):
         """

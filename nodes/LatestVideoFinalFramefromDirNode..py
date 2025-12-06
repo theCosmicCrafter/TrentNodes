@@ -46,6 +46,8 @@ class LatestVideoFinalFrameNode:
     
     # This helps ComfyUI categorize the node in the interface
     CATEGORY = "Trent/Video"
+    BACKGROUND_COLOR = "#0a1218"  # Dark background
+    FOREGROUND_COLOR = "#0c1b21"  # Darker teal
     
     # A unique identifier for this node type
     FUNCTION = "extract_final_frame"

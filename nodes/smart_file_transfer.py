@@ -54,6 +54,8 @@ class SmartFileTransferNode:
     RETURN_NAMES = ("result_message", "final_path", "success")
     FUNCTION = "smart_transfer_file"
     CATEGORY = "Trent/Utilities"
+    BACKGROUND_COLOR = "#0a1218"  # Dark background
+    FOREGROUND_COLOR = "#0c1b21"  # Darker teal
     OUTPUT_NODE = True
     
     def find_unique_filename(self, base_path, rename_pattern):
@@ -207,6 +209,8 @@ class FileCollisionTestNode:
     RETURN_NAMES = ("result_message", "success")
     FUNCTION = "create_test_file"
     CATEGORY = "Trent/Utilities"
+    BACKGROUND_COLOR = "#0a1218"  # Dark background
+    FOREGROUND_COLOR = "#0c1b21"  # Darker teal
     OUTPUT_NODE = True
     
     def create_test_file(self, file_path, file_content):
@@ -255,6 +259,8 @@ class FileListNode:
     RETURN_NAMES = ("file_list",)
     FUNCTION = "list_directory_files"
     CATEGORY = "Trent/Utilities"
+    BACKGROUND_COLOR = "#0a1218"  # Dark background
+    FOREGROUND_COLOR = "#0c1b21"  # Darker teal
     OUTPUT_NODE = True
     
     def list_directory_files(self, directory_path, show_full_paths):

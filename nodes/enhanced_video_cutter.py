@@ -25,6 +25,8 @@ class EnhancedVideoCutter:
     RETURN_NAMES = ("video_paths", "output_folder", "metadata_json",)
     FUNCTION = "process_video_cuts"
     CATEGORY = "Trent/Video"
+    BACKGROUND_COLOR = "#0a1218"  # Dark background
+    FOREGROUND_COLOR = "#0c1b21"  # Darker teal
     
     DESCRIPTION = """
     Enhanced Video Cutter with improved accuracy and file management:

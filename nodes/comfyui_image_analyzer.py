@@ -50,6 +50,8 @@ class ImageBatchAnalyzer:
     RETURN_NAMES = ("analysis_graph", "statistics_text")
     FUNCTION = "analyze_batch"
     CATEGORY = "Trent/Image"
+    BACKGROUND_COLOR = "#0a1218"  # Dark background
+    FOREGROUND_COLOR = "#0c1b21"  # Darker teal
     
     def analyze_batch(self, images, analysis_type="comprehensive", graph_width=1920, graph_height=1080):
         """

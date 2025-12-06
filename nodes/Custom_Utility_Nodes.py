@@ -120,6 +120,8 @@ class CUN_NumberCounter:
     RETURN_NAMES = ("number", "float", "int")
     FUNCTION = "increment_number"
     CATEGORY = "Trent/Utilities"
+    BACKGROUND_COLOR = "#0a1218"  # Dark background
+    FOREGROUND_COLOR = "#0c1b21"  # Darker teal
 
     def increment_number(self, number_type, mode, start, stop, step, unique_id, reset_bool=0):
         counter = float(start)
@@ -179,6 +181,8 @@ class CUN_TextFileLineLoader:
     RETURN_NAMES = ("line_text", "line_count")
     FUNCTION = "load_file_line"
     CATEGORY = "Trent/Utilities"
+    BACKGROUND_COLOR = "#0a1218"  # Dark background
+    FOREGROUND_COLOR = "#0c1b21"  # Darker teal
 
     def load_file_line(self, file_path='', label='TextBatch', mode='automatic', index=0):
         if not file_path or not os.path.exists(file_path):

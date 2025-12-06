@@ -78,6 +78,8 @@ class AnimationDuplicateFrameProcessor:
     RETURN_NAMES = ("processed_frames", "duplicate_mask", "timing_report")
     FUNCTION = "process_animation_timing"
     CATEGORY = "Trent/Video"
+    BACKGROUND_COLOR = "#0a1218"  # Dark background
+    FOREGROUND_COLOR = "#0c1b21"  # Darker teal
     
     def calculate_ssim(self, frame1, frame2):
         """
