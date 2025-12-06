@@ -1,84 +1,97 @@
-# TrentNodes
+# Trent Nodes
 
-A comprehensive collection of custom ComfyUI nodes for advanced video processing, keyframe management, scene detection, and video analysis workflows.
+Professional video processing, scene detection, and utility nodes for ComfyUI.
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![ComfyUI](https://img.shields.io/badge/ComfyUI-Custom%20Nodes-orange)](https://github.com/comfyanonymous/ComfyUI)
 
-## 🎯 Features
-
-### Video Processing & Analysis
-- **Enhanced Video Cutter**: Advanced scene detection with adaptive thresholding and motion analysis
-- **Video Folder Analyzer**: Comprehensive analysis of video files with detailed metadata reporting
-- **Latest Video Frame Extractor**: Extract final frames from directories of videos
-- **Smart File Transfer**: Intelligent file management and organization tools
-
-### Keyframe Management
-- **Wan Vace Keyframe Builder**: Dynamic keyframe sequencing for Wan Vace video generation
-  - Dynamically add/remove image inputs
-  - Frame-accurate positioning
-  - Automatic mask generation
-  - Interactive UI with custom JavaScript controls
-
-### Scene Detection & Analysis
-- **Ultimate Scene Detect**: Advanced scene detection with configurable parameters
-- **Animation Frame Analyzer**: Analyze animation sequences for duplicates and patterns
-- **Cross Dissolve Overlap**: Sophisticated frame blending and transitions
-
-### Utility Nodes
-- **Custom Utility Nodes**: Collection of helpful workflow utilities
-- **JSON Tools**: JSON extraction and summary nodes
-- **Filename Extractors**: Parse and extract information from filenames
-- **Image Analyzer**: Comprehensive image analysis with statistical reports
-- **Latent Aligned Mask**: Precision masking tools for latent space operations
-
-### Effects
-- **Bevel & Emboss**: Advanced image effects for creating depth and dimension
-
-## 📦 Installation
+## Installation
 
 ### Via ComfyUI Manager (Recommended)
-1. Open ComfyUI Manager
-2. Search for "Trent Nodes"
-3. Click Install
-4. Restart ComfyUI
+Search for "Trent Nodes" in ComfyUI Manager and click Install.
 
 ### Via Comfy CLI
 ```bash
-comfy node registry-install comfyui-trentnodes
+comfy node registry-install trentnodes
 ```
 
 ### Manual Installation
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/yourusername/TrentNodes.git
+git clone https://github.com/TrentHunter82/TrentNodes.git
 cd TrentNodes
 pip install -r requirements.txt
 ```
 
-## 🚀 Quick Start
+## Nodes
 
-After installation, you'll find Trent Nodes organized in the following categories:
+All nodes are organized under the `Trent/` category for easy navigation.
 
-- **Trent Tools/** - Main utility and processing nodes
-- **Trent/Video/** - Video processing and analysis
-- **Wan/Vace/** - Wan Vace keyframe tools
-- **Trent/Scene/** - Scene detection and analysis
+### 📹 Trent/Video (7 nodes)
 
-### Example: Scene Detection Workflow
-1. Load your video frames as an IMAGE batch
-2. Add **Enhanced Video Cutter** node
-3. Configure threshold and minimum scene length
-4. Get individual scene videos with clean filenames
+**Enhanced Video Cutter**  
+Advanced scene detection with adaptive thresholding and motion analysis. Exports scenes as individual MP4 files with clean naming and comprehensive metadata tracking.
 
-### Example: Keyframe Sequencing for Wan Vace
-1. Add **Wan Vace Keyframe Builder** node
-2. Set frame count (e.g., 16 frames)
-3. Connect images to dynamic inputs
-4. Position each image using frame sliders
-5. Output synchronized image batch and masks
+**Ultimate Scene Detect**  
+High-precision scene boundary detection using configurable threshold algorithms. Identifies cuts, fades, and transitions in video sequences.
 
-## 🛠️ Requirements
+**Video Folder Analyzer**  
+Scans directories for video files and generates detailed reports including resolution, frame rate, codec, duration, and file size. Outputs as text, JSON, or markdown.
+
+**Latest Video Last N Frames**  
+Extracts the final N frames from the most recently modified video in a specified directory. Useful for monitoring render outputs.
+
+**Latest Video Final Frame**  
+Retrieves the last frame from the newest video file in a folder. Streamlines iterative video generation workflows.
+
+**Cross Dissolve with Overlap**  
+Creates smooth frame transitions with configurable overlap duration. Blends adjacent frames for professional video effects.
+
+**Enhanced Animation Timing Processor**  
+Analyzes animation sequences to detect duplicate frames, timing patterns, and frame holds. Optimizes animation frame sequences.
+
+### 🖼️ Trent/Image (2 nodes)
+
+**Bevel/Emboss Effect**  
+Applies depth and dimensionality to images through configurable bevel and emboss filters. Includes adjustable angle, depth, and smoothing parameters.
+
+**Image Batch Analyzer**  
+Comprehensive statistical analysis of image batches. Generates histograms, color distribution charts, and detailed reports on brightness, contrast, and color composition.
+
+### 🔧 Trent/Utilities (7 nodes)
+
+**Smart File Transfer (Auto-Rename)**  
+Intelligent file management with automatic conflict resolution, checksums, and organized directory structures. Safely transfers files with duplicate detection.
+
+**Custom Filename Generator**  
+Creates structured filenames using templates with support for timestamps, counters, and metadata variables. Ensures consistent file naming across workflows.
+
+**Filename Extractor**  
+Parses filenames to extract embedded metadata, timestamps, and structured information. Converts filenames into usable workflow data.
+
+**JSON → Multi-Line Summary**  
+Converts complex JSON data into human-readable multi-line summaries. Formats nested structures for display and logging.
+
+**JSON Extractor**  
+Extracts specific values from JSON objects using path notation. Simplifies working with structured data in workflows.
+
+**Number Counter**  
+Generates sequential numbers with configurable start, step, and padding. Essential for batch processing and frame numbering.
+
+**Wan2.1 Frame Adjuster**  
+Specialized utility for adjusting frame timing and synchronization in Wan 2.1 video generation workflows.
+
+### 🎭 Trent/Masks (1 node)
+
+**Latent Aligned Mask**  
+Creates precision masks aligned to latent space dimensions. Ensures proper mask scaling for latent-based video and image processing.
+
+### 🎬 Trent/Keyframes (1 node)
+
+**Wan Vace Keyframe Builder**  
+Dynamic keyframe sequencing for Wan Vace video generation. Features interactive UI with drag-and-drop image inputs, frame-accurate positioning, automatic resizing, and synchronized mask generation. Supports up to 256 frames with customizable filler frames.
+
+## Requirements
 
 - ComfyUI (latest version recommended)
 - Python 3.10+
@@ -86,72 +99,53 @@ After installation, you'll find Trent Nodes organized in the following categorie
 - numpy >= 1.24.0
 - pillow >= 10.0.0
 - matplotlib >= 3.7.0
+- colorama >= 0.4.6
 
-## 📖 Node Documentation
+## Features
 
-### Enhanced Video Cutter
-Advanced scene detection with adaptive thresholding:
-- **Inputs**: IMAGE batch, output folder, FPS, threshold
-- **Outputs**: Video paths, metadata JSON
-- **Features**: Motion analysis, frame-accurate cutting, clean naming
+✅ **23 professional nodes** for video and image workflows  
+✅ **Organized categories** - all nodes under `Trent/` namespace  
+✅ **Auto-discovery** - drop nodes in `nodes/` folder and restart  
+✅ **Colorful startup banner** with load validation  
+✅ **Comprehensive error checking** on initialization  
+✅ **Registry published** - semantic versioning support  
 
-### Wan Vace Keyframe Builder
-Dynamic keyframe positioning for video generation:
-- **Inputs**: Frame count, images (dynamic), frame positions
-- **Outputs**: Image batch, mask batch
-- **Features**: Auto-resizing, filler frame generation, JavaScript UI
+## Development
 
-### Video Folder Analyzer
-Comprehensive video file analysis:
-- **Inputs**: Folder path, include subfolders, output format
-- **Outputs**: Detailed report (text/JSON/markdown), statistics
-- **Features**: Multiple format support, recursive scanning
+```bash
+# Clone the repository
+git clone https://github.com/TrentHunter82/TrentNodes.git
+cd TrentNodes
 
-## 🎨 Categories
+# Install dependencies
+pip install -r requirements.txt
 
-All nodes are organized with the `Trent` prefix for easy discovery:
-- `Trent Tools/` - Core utilities
-- `Trent/Video/` - Video processing
-- `Trent/Scene/` - Scene analysis
-- `Wan/Vace/` - Keyframe tools
+# Add new nodes
+# Just drop .py files in nodes/ folder - they auto-register!
+```
 
-## 🐛 Known Issues
+## Contributing
 
-- Some nodes require ffmpeg for video encoding
-- Large video batches may require significant VRAM
+Pull requests welcome! Please:
+- Follow existing code style
+- Add docstrings to new nodes
+- Test thoroughly before submitting
+- Update this README with new nodes
 
-## 🤝 Contributing
+## Support
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+- **Issues**: [GitHub Issues](https://github.com/TrentHunter82/TrentNodes/issues)
+- **Registry**: [Comfy Registry](https://registry.comfy.org/publishers/flippingsigmas)
+- **ComfyUI Discord**: [Join Server](https://discord.com/invite/comfyorg)
 
-## 📝 License
+## License
 
-MIT License - see LICENSE file for details
+MIT License - see [LICENSE](LICENSE) for details.
 
-## 👤 Author
+## Author
 
-**Trent** - [Flipping Sigmas](https://github.com/TrentHunter82)
-
-## 🙏 Acknowledgments
-
-- ComfyUI team for the amazing framework
-- ComfyUI community for inspiration and feedback
-- Wan Vace team for their excellent video generation models
-
-## 📊 Version History
-
-- **1.0.0** - Initial release
-  - Core video processing nodes
-  - Scene detection tools
-  - Wan Vace keyframe builder
-  - Comprehensive utility nodes
-
-## 🔗 Links
-
-- [ComfyUI](https://github.com/comfyanonymous/ComfyUI)
-- [ComfyUI Manager](https://github.com/ltdrdata/ComfyUI-Manager)
-- [Report Issues](https://github.com/yourusername/TrentNodes/issues)
+**Trent** - [Trent Films](https://github.com/TrentHunter82)
 
 ---
 
-Made with ❤️ by Trent for the ComfyUI community
+*Made with ❤️ for the ComfyUI community*
