@@ -410,8 +410,6 @@ class UltimateSceneCutterNode:
     RETURN_NAMES = ("original_images", "cuts_report", "output_paths", "num_segments")
     FUNCTION = "detect_and_split"
     CATEGORY = "Trent/Video"
-    BACKGROUND_COLOR = "#0a1218"  # Dark background
-    FOREGROUND_COLOR = "#0c1b21"  # Darker teal
     
     def detect_and_split(self, images, detection_method, sensitivity, output_folder, 
                         base_filename, create_videos, frame_rate,

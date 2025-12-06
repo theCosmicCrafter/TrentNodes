@@ -35,8 +35,6 @@ class VideoFolderAnalyzer:
     RETURN_NAMES = ("report", "json_data")
     FUNCTION = "analyze_videos"
     CATEGORY = "Trent/Video"
-    BACKGROUND_COLOR = "#0a1218"  # Dark background
-    FOREGROUND_COLOR = "#0c1b21"  # Darker teal
     OUTPUT_NODE = True
 
     def analyze_videos(self, folder_path, include_subfolders, output_format, file_extensions="mp4,avi,mov,mkv,wmv,flv,webm,m4v,mpg,mpeg"):

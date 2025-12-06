@@ -50,8 +50,6 @@ class CrossDissolveOverlap:
     RETURN_NAMES = ("images", "frame_count", "blend_info")
     FUNCTION = "cross_dissolve_overlap"
     CATEGORY = "Trent/Video"
-    BACKGROUND_COLOR = "#0a1218"  # Dark background
-    FOREGROUND_COLOR = "#0c1b21"  # Darker teal
     DESCRIPTION = "Cross-dissolve two image batches with precise overlap control"
     
     def validate_inputs(self, images_a: torch.Tensor, images_b: torch.Tensor, overlap_frames: int) -> Tuple[bool, str]:

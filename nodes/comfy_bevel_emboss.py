@@ -81,8 +81,6 @@ class BevelEmbossNode:
     RETURN_TYPES = ("IMAGE",)
     FUNCTION = "apply_bevel_emboss"
     CATEGORY = "Trent/Image"
-    BACKGROUND_COLOR = "#0a1218"  # Dark background
-    FOREGROUND_COLOR = "#0c1b21"  # Darker teal
     
     def apply_bevel_emboss(self, image, depth, angle, highlight_opacity, shadow_opacity, soften, mode, 
                            bevel_width=5.0, debug_device=False, mask=None, mask_mode="apply_to_masked", mask_blur=0.0):

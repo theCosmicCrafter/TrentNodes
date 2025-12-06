@@ -27,8 +27,6 @@ class CustomFilenameGenerator:
     RETURN_NAMES = ("filename",)
     FUNCTION = "generate_filename"
     CATEGORY = "Trent/Utilities"
-    BACKGROUND_COLOR = "#0a1218"  # Dark background
-    FOREGROUND_COLOR = "#0c1b21"  # Darker teal
     
     def generate_filename(self, project, sequence, shot, department, workflow, 
                          pass_name, initials, version, separator="_", force_uppercase=True):

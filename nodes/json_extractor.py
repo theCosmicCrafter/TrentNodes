@@ -26,8 +26,6 @@ class JSONParamsExtractorNode:
     FUNCTION = "extract_and_format"
 
     CATEGORY = "Trent/Utilities"
-    BACKGROUND_COLOR = "#0a1218"  # Dark background
-    FOREGROUND_COLOR = "#0c1b21"  # Darker teal
 
     def extract_and_format(self, json_input="{}", json_file_path="", prefix=""):
         json_data = None

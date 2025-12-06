@@ -23,8 +23,6 @@ class Wan21FrameAdjusterNode:
     RETURN_NAMES = ("adjusted_images", "final_frame_count", "frames_added")
     FUNCTION = "adjust_frame_count"
     CATEGORY = "Trent/Utilities"
-    BACKGROUND_COLOR = "#0a1218"  # Dark background
-    FOREGROUND_COLOR = "#0c1b21"  # Darker teal
     
     def adjust_frame_count(self, images):
         """

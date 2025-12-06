@@ -59,8 +59,6 @@ class LatentAlignedMask:
     RETURN_NAMES = ("aligned_mask", "latent_preview", "compression_factor")
     FUNCTION = "align_mask"
     CATEGORY = "Trent/Masks"
-    BACKGROUND_COLOR = "#0a1218"  # Dark background
-    FOREGROUND_COLOR = "#0c1b21"  # Darker teal
     
     def get_vae_compression_factor(self, vae):
         """
@@ -276,8 +274,6 @@ class LatentAlignedMaskAdvanced:
     RETURN_NAMES = ("mask", "info")
     FUNCTION = "process_mask"
     CATEGORY = "Trent/Masks"
-    BACKGROUND_COLOR = "#0a1218"  # Dark background
-    FOREGROUND_COLOR = "#0c1b21"  # Darker teal
     
     def process_mask(self, mask, vae, mode="balanced", 
                     prevent_edge_artifacts=True, smooth_boundaries=True):
@@ -367,8 +363,6 @@ class LatentAlignedMaskSimple:
     RETURN_NAMES = ("aligned_mask", "latent_preview")
     FUNCTION = "align_mask"
     CATEGORY = "Trent/Masks"
-    BACKGROUND_COLOR = "#0a1218"  # Dark background
-    FOREGROUND_COLOR = "#0c1b21"  # Darker teal
     
     def align_mask(self, mask, compression_factor=8, expansion_pixels=8, 
                    blur_latent_units=1, threshold=0.5):
@@ -489,8 +483,6 @@ class LatentAlignedMaskWan:
     RETURN_NAMES = ("aligned_mask",)
     FUNCTION = "align_mask"
     CATEGORY = "Trent/Masks"
-    BACKGROUND_COLOR = "#0a1218"  # Dark background
-    FOREGROUND_COLOR = "#0c1b21"  # Darker teal
     
     def align_mask(self, mask, preset="standard", expansion_pixels=64, blur_pixels=8):
         """

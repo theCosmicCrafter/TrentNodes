@@ -73,8 +73,6 @@ class WanVaceKeyframeBuilder:
     
     FUNCTION = "build_sequence"
     CATEGORY = "Trent/Keyframes"
-    BACKGROUND_COLOR = "#0a1218"  # Dark background
-    FOREGROUND_COLOR = "#0c1b21"  # Darker teal
     DESCRIPTION = "Creates keyframe image and mask sequences for Wan Vace video generation."
     
     @classmethod
