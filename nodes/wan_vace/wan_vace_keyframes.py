@@ -41,13 +41,6 @@ class WanVaceKeyframeBuilder:
                     "step": 8,
                     "tooltip": "Height for filler frames (used if no images connected)"
                 }),
-                "gray_value": ("FLOAT", {
-                    "default": 0.5,
-                    "min": 0.0,
-                    "max": 1.0,
-                    "step": 0.01,
-                    "tooltip": "Gray level for filler frames (0=black, 1=white)"
-                }),
                 # First dynamic image input - JS will add more as needed
                 "image_1": ("IMAGE",),
                 "image_1_frame": ("INT", {
@@ -85,7 +78,6 @@ class WanVaceKeyframeBuilder:
         frame_count: int,
         default_width: int = 832,
         default_height: int = 480,
-        gray_value: float = 0.5,
         unique_id: str = None,
         prompt: dict = None,
         **kwargs
@@ -93,6 +85,9 @@ class WanVaceKeyframeBuilder:
         """
         Build the keyframe sequence and matching mask batch.
         """
+        
+        # Hardcoded gray value: exactly RGB(128, 128, 128)
+        GRAY_VALUE = 128.0 / 255.0  # = 0.5019607843137255
         
         # Get widget values from the prompt data for this node
         # This is how we access dynamically-added widget values
@@ -154,8 +149,8 @@ class WanVaceKeyframeBuilder:
             device = torch.device('cpu')
             dtype = torch.float32
         
-        # Create templates
-        gray_frame = torch.full((1, h, w, c), gray_value, dtype=dtype, device=device)
+        # Create templates - exact RGB(128, 128, 128)
+        gray_frame = torch.full((1, h, w, c), GRAY_VALUE, dtype=dtype, device=device)
         white_mask = torch.ones((1, h, w), dtype=dtype, device=device)
         black_mask = torch.zeros((1, h, w), dtype=dtype, device=device)
         
