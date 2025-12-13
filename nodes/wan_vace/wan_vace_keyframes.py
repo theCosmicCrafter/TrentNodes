@@ -86,10 +86,6 @@ class WanVaceKeyframeBuilder:
         Build the keyframe sequence and matching mask batch.
         """
         
-        # Hardcoded gray value: 0.5 in 0-1 space = 0 in -1 to 1 space (after * 2 - 1 normalization)
-        # This is what VACE uses for "empty" frames that should be generated
-        GRAY_VALUE = 0.5  # RGB(127.5, 127.5, 127.5) ≈ RGB(128, 128, 128)
-        
         # Get widget values from the prompt data for this node
         # This is how we access dynamically-added widget values
         widget_values = {}
@@ -152,11 +148,14 @@ class WanVaceKeyframeBuilder:
         dtype = torch.float32
         
         # Create templates with exact values
-        # Gray: 0.5 (= 0 after *2-1 normalization, which VACE interprets as "generate this")
-        # White mask: 1.0 (keyframe - keep this), Black mask: 0.0 (filler - generate this)
-        gray_frame = torch.full((1, h, w, c), GRAY_VALUE, dtype=dtype, device=device)
-        white_mask = torch.ones((1, h, w), dtype=dtype, device=device)
-        black_mask = torch.zeros((1, h, w), dtype=dtype, device=device)
+        # Filler frames: Use empty_frame_level (0.5 = gray, matching Kijai's default)
+        # VACE mask convention (from Kijai's code):
+        #   mask = 0 for keyframes (preserve these)
+        #   mask = 1 for filler frames (generate these)
+        FILLER_VALUE = 0.5  # Gray filler frames (matches Kijai's empty_frame_level default)
+        filler_frame = torch.full((1, h, w, c), FILLER_VALUE, dtype=dtype, device=device)
+        keyframe_mask = torch.zeros((1, h, w), dtype=dtype, device=device)  # 0 = preserve keyframe
+        filler_mask = torch.ones((1, h, w), dtype=dtype, device=device)     # 1 = generate this frame
         
         # Build the output sequences
         image_list = []
@@ -185,17 +184,17 @@ class WanVaceKeyframeBuilder:
                     img = img.permute(0, 2, 3, 1)  # BCHW -> BHWC
                 
                 image_list.append(img)
-                mask_list.append(white_mask.clone())
+                mask_list.append(keyframe_mask.clone())  # mask=0 = preserve this keyframe
             else:
-                image_list.append(gray_frame.clone())
-                mask_list.append(black_mask.clone())
+                image_list.append(filler_frame.clone())
+                mask_list.append(filler_mask.clone())    # mask=1 = generate this frame
         
         # Concatenate into batches
         images_out = torch.cat(image_list, dim=0)
         masks_out = torch.cat(mask_list, dim=0)
         
         print(f"[WanVaceKeyframeBuilder] Output shapes: images={images_out.shape}, masks={masks_out.shape}, dtype={images_out.dtype}")
-        print(f"[WanVaceKeyframeBuilder] Gray value: {GRAY_VALUE} (= 0 in -1 to 1 space after normalization)")
+        print(f"[WanVaceKeyframeBuilder] Filler value: {FILLER_VALUE}, Keyframes: {len(keyframes)} (mask=0), Fillers: {frame_count - len(keyframes)} (mask=1)")
         
         return (images_out, masks_out)
 
