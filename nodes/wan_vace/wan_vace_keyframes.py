@@ -19,9 +19,9 @@ class WanVaceKeyframeBuilder:
         return {
             "required": {
                 "frame_count": ("INT", {
-                    "default": 16, 
-                    "min": 2, 
-                    "max": 256, 
+                    "default": 16,
+                    "min": 2,
+                    "max": 256,
                     "step": 1,
                     "tooltip": "Total number of frames in the output sequence"
                 }),
@@ -40,6 +40,21 @@ class WanVaceKeyframeBuilder:
                     "max": 4096,
                     "step": 8,
                     "tooltip": "Height for filler frames (used if no images connected)"
+                }),
+                "auto_spacing": ("BOOLEAN", {
+                    "default": False,
+                    "tooltip": "Automatically distribute keyframes evenly across the frame range"
+                }),
+                "spacing_type": (["linear", "ease_in", "ease_out", "ease_in_out"], {
+                    "default": "linear",
+                    "tooltip": "Spacing curve type: linear (even), ease_in (slow start), ease_out (slow end), ease_in_out (slow both ends)"
+                }),
+                "min_spacing": ("INT", {
+                    "default": 8,
+                    "min": 1,
+                    "max": 64,
+                    "step": 1,
+                    "tooltip": "Minimum frames between keyframes (VACE typically needs 8+ for good interpolation)"
                 }),
                 # First dynamic image input - JS will add more as needed
                 "image_1": ("IMAGE",),

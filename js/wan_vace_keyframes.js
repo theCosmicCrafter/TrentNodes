@@ -45,6 +45,128 @@ app.registerExtension({
             const widget = node.widgets?.find(w => w.name === "frame_count");
             return widget?.value || 256;
         };
+
+        /**
+         * Get auto_spacing toggle value
+         */
+        const getAutoSpacing = () => {
+            const widget = node.widgets?.find(w => w.name === "auto_spacing");
+            return widget?.value || false;
+        };
+
+        /**
+         * Get spacing_type value
+         */
+        const getSpacingType = () => {
+            const widget = node.widgets?.find(w => w.name === "spacing_type");
+            return widget?.value || "linear";
+        };
+
+        /**
+         * Get min_spacing value
+         */
+        const getMinSpacing = () => {
+            const widget = node.widgets?.find(w => w.name === "min_spacing");
+            return widget?.value || 8;
+        };
+
+        /**
+         * Easing functions - take t in [0,1], return eased value in [0,1]
+         */
+        const easingFunctions = {
+            linear: (t) => t,
+            ease_in: (t) => t * t,
+            ease_out: (t) => 1 - (1 - t) * (1 - t),
+            ease_in_out: (t) => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2,
+        };
+
+        /**
+         * Calculate auto-spaced frame positions for connected images
+         * Enforces minimum spacing between keyframes for VACE compatibility
+         */
+        const calculateAutoSpacedFrames = () => {
+            const indices = getImageInputIndices();
+            const connectedIndices = indices.filter(i => isInputConnected(i)).sort((a, b) => a - b);
+
+            if (connectedIndices.length === 0) return {};
+
+            const frameCount = getFrameCount();
+            const spacingType = getSpacingType();
+            const minSpacing = getMinSpacing();
+            const easingFn = easingFunctions[spacingType] || easingFunctions.linear;
+
+            const framePositions = {};
+            const numKeyframes = connectedIndices.length;
+
+            if (numKeyframes === 1) {
+                // Single image goes to frame 1
+                framePositions[connectedIndices[0]] = 1;
+            } else {
+                // Calculate minimum required frames for this many keyframes
+                // Need (numKeyframes - 1) gaps, each at least minSpacing
+                const minRequiredFrames = 1 + (numKeyframes - 1) * minSpacing;
+
+                if (frameCount < minRequiredFrames) {
+                    // Not enough frames - space evenly with whatever we have
+                    // but warn via console
+                    console.warn(`[WanVace] Warning: ${frameCount} frames is not enough for ${numKeyframes} keyframes with ${minSpacing} min spacing. Need at least ${minRequiredFrames} frames.`);
+                }
+
+                // Apply easing with minimum spacing constraint
+                // First, calculate raw eased positions
+                const rawPositions = [];
+                for (let i = 0; i < numKeyframes; i++) {
+                    const t = i / (numKeyframes - 1);
+                    const easedT = easingFn(t);
+                    rawPositions.push(easedT);
+                }
+
+                // Now map to frame positions while enforcing minimum spacing
+                // Start from frame 1, end at frameCount
+                const availableRange = frameCount - 1; // frames we can distribute across
+
+                for (let i = 0; i < numKeyframes; i++) {
+                    let frame;
+                    if (i === 0) {
+                        frame = 1; // First keyframe always at frame 1
+                    } else if (i === numKeyframes - 1) {
+                        frame = frameCount; // Last keyframe always at end
+                    } else {
+                        // Middle keyframes: apply easing but enforce min spacing
+                        const rawFrame = Math.round(1 + rawPositions[i] * availableRange);
+
+                        // Ensure at least minSpacing from previous
+                        const prevFrame = framePositions[connectedIndices[i - 1]];
+                        const minFrame = prevFrame + minSpacing;
+
+                        // Also ensure room for remaining keyframes
+                        const remainingKeyframes = numKeyframes - 1 - i;
+                        const maxFrame = frameCount - (remainingKeyframes * minSpacing);
+
+                        frame = Math.max(minFrame, Math.min(maxFrame, rawFrame));
+                    }
+                    framePositions[connectedIndices[i]] = frame;
+                }
+            }
+
+            return framePositions;
+        };
+
+        /**
+         * Apply auto-spacing to frame widgets
+         */
+        const applyAutoSpacing = () => {
+            if (!getAutoSpacing()) return;
+
+            const framePositions = calculateAutoSpacedFrames();
+
+            for (const [imgIdx, framePos] of Object.entries(framePositions)) {
+                const widget = node.widgets?.find(w => w.name === `image_${imgIdx}_frame`);
+                if (widget) {
+                    widget.value = framePos;
+                }
+            }
+        };
         
         /**
          * Find or create a frame slider widget for given index
@@ -208,7 +330,10 @@ app.registerExtension({
             
             // Update widget visibility
             updateWidgetVisibility();
-            
+
+            // Apply auto-spacing if enabled
+            applyAutoSpacing();
+
             // Resize node
             node.setSize(node.computeSize());
         };
@@ -277,9 +402,46 @@ app.registerExtension({
                     originalCallback.apply(this, arguments);
                 }
                 updateFrameSliderMax();
+                applyAutoSpacing();
             };
         }
-        
+
+        // Hook into auto_spacing toggle changes
+        const autoSpacingWidget = node.widgets?.find(w => w.name === "auto_spacing");
+        if (autoSpacingWidget) {
+            const originalCallback = autoSpacingWidget.callback;
+            autoSpacingWidget.callback = function(value) {
+                if (originalCallback) {
+                    originalCallback.apply(this, arguments);
+                }
+                applyAutoSpacing();
+            };
+        }
+
+        // Hook into spacing_type dropdown changes
+        const spacingTypeWidget = node.widgets?.find(w => w.name === "spacing_type");
+        if (spacingTypeWidget) {
+            const originalCallback = spacingTypeWidget.callback;
+            spacingTypeWidget.callback = function(value) {
+                if (originalCallback) {
+                    originalCallback.apply(this, arguments);
+                }
+                applyAutoSpacing();
+            };
+        }
+
+        // Hook into min_spacing changes
+        const minSpacingWidget = node.widgets?.find(w => w.name === "min_spacing");
+        if (minSpacingWidget) {
+            const originalCallback = minSpacingWidget.callback;
+            minSpacingWidget.callback = function(value) {
+                if (originalCallback) {
+                    originalCallback.apply(this, arguments);
+                }
+                applyAutoSpacing();
+            };
+        }
+
         // Initial setup - remove the default image_1_frame widget (we'll add it dynamically when connected)
         setTimeout(() => {
             // Remove the statically-defined image_1_frame widget
