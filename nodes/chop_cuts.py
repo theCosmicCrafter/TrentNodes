@@ -1,25 +1,31 @@
 """
-Chop Cuts - Accurate scene detection and video splitting for ComfyUI.
+Chop Cuts - GPU-accelerated scene detection and video splitting for ComfyUI.
 
 Detects scene cuts in video frames and exports each scene as a separate MP4 file
 with a detailed report of cut locations and timestamps.
+
+Based on FL_VideoCut's proven detection algorithms with enhancements:
+- Full GPU acceleration for intensity/hybrid detection
+- Clean sequential filenames (no random UUIDs)
+- Adaptive detection method inspired by PySceneDetect
 """
 
 import os
 import cv2
 import numpy as np
 import torch
-from typing import List, Dict, Tuple
+import torch.nn.functional as F
+from typing import List, Dict, Tuple, Optional
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from comfy.utils import ProgressBar
+from comfy.utils import ProgressBar, common_upscale
 
 
 class ChopCuts:
     """
-    Scene detection and video splitting node.
+    GPU-accelerated scene detection and video splitting node.
     Accurately detects cuts, fades, and transitions, then exports each scene
     as a separate MP4 file with a detailed report.
     """
@@ -29,16 +35,17 @@ class ChopCuts:
     FUNCTION = "process"
     CATEGORY = "Trent/Video"
 
-    DESCRIPTION = """Chop Cuts - Scene Detection & Video Splitting
+    DESCRIPTION = """Chop Cuts - GPU-Accelerated Scene Detection & Video Splitting
 
 Automatically detects scene cuts in video frames and exports each scene
 as a separate MP4 file. Generates a report with cut locations and timestamps.
 
 Features:
-- Multi-metric detection (intensity, color histogram, structural similarity)
-- Catches hard cuts, dissolves, and fade transitions
+- GPU-accelerated detection (intensity, edge, hybrid methods)
+- Adaptive detection mode for fast camera motion
+- Clean sequential filenames (scene_001.mp4, scene_002.mp4, etc.)
 - Fast FFmpeg-based video export
-- Simple sensitivity control
+- Downsampling option for faster detection on large frames
 """
 
     @classmethod
@@ -49,21 +56,31 @@ Features:
                 "output_folder": ("STRING", {"default": "./output/chop_cuts"}),
                 "base_filename": ("STRING", {"default": "scene"}),
                 "fps": ("INT", {"default": 24, "min": 1, "max": 120, "step": 1}),
-                "sensitivity": ("FLOAT", {"default": 0.5, "min": 0.1, "max": 1.0, "step": 0.05,
-                               "description": "Detection sensitivity (lower = more sensitive)"}),
-                "min_scene_frames": ("INT", {"default": 12, "min": 1, "max": 300, "step": 1,
+                "threshold": ("FLOAT", {"default": 30.0, "min": 1.0, "max": 100.0, "step": 0.1,
+                             "description": "Detection threshold (lower = more sensitive)"}),
+                "min_scene_frames": ("INT", {"default": 12, "min": 2, "max": 1000, "step": 1,
                                     "description": "Minimum frames per scene"}),
                 "quality": ("INT", {"default": 85, "min": 1, "max": 100, "step": 1,
                            "description": "Video quality (1-100)"}),
+                "detection_method": (["hybrid", "intensity", "histogram", "adaptive"], {
+                                    "default": "hybrid",
+                                    "description": "Detection algorithm to use"}),
+                "max_workers": ("INT", {"default": 4, "min": 1, "max": 16, "step": 1,
+                               "description": "Parallel workers for video export"}),
+                "downsample_detection": ("BOOLEAN", {"default": True,
+                                        "description": "Downsample for faster detection"}),
+                "use_gpu": ("BOOLEAN", {"default": True,
+                           "description": "Use GPU acceleration when available"}),
             },
         }
 
     def process(self, images: torch.Tensor, output_folder: str, base_filename: str,
-                fps: int, sensitivity: float, min_scene_frames: int,
-                quality: int) -> Tuple[str, str, str, int]:
+                fps: int, threshold: float, min_scene_frames: int, quality: int,
+                detection_method: str, max_workers: int, downsample_detection: bool,
+                use_gpu: bool) -> Tuple[str, str, str, int]:
         """Main processing function."""
 
-        print(f"[Chop Cuts] Starting scene detection...")
+        print(f"[Chop Cuts] Starting scene detection with method: {detection_method}")
 
         # Setup output directory
         output_folder = os.path.abspath(output_folder)
@@ -73,16 +90,31 @@ Features:
         batch_size, height, width, channels = images.shape
         print(f"[Chop Cuts] Processing {batch_size} frames ({width}x{height})")
 
-        # Convert to numpy for processing
-        frames = (images * 255).cpu().numpy().astype(np.uint8)
+        # Determine device
+        use_gpu = use_gpu and torch.cuda.is_available()
+        device = 'cuda' if use_gpu else 'cpu'
+        print(f"[Chop Cuts] Using device: {device}")
+
+        # Prepare detection images (optionally downsampled)
+        if downsample_detection and (width > 640 or height > 640):
+            detection_images = self._downsample_for_detection(images, device)
+        else:
+            detection_images = images.to(device) if use_gpu else images
 
         # Detect scenes
-        scenes = self._detect_scenes(frames, sensitivity, min_scene_frames)
+        scenes = self._detect_scenes(
+            detection_images, images, threshold, min_scene_frames,
+            detection_method, device
+        )
         print(f"[Chop Cuts] Detected {len(scenes)} scenes")
 
+        # Convert to numpy for video export
+        np_frames = (images * 255).cpu().numpy().astype(np.uint8)
+
         # Export videos
-        video_paths = self._export_videos(frames, scenes, output_folder,
-                                          base_filename, fps, quality)
+        video_paths = self._export_videos(
+            np_frames, scenes, output_folder, base_filename, fps, quality, max_workers
+        )
 
         # Generate report
         report = self._generate_report(scenes, batch_size, fps, video_paths)
@@ -96,191 +128,266 @@ Features:
             len(scenes)
         )
 
-    def _detect_scenes(self, frames: np.ndarray, sensitivity: float,
-                       min_scene_frames: int) -> List[Dict]:
-        """
-        Detect scene boundaries using multi-metric analysis.
+    def _downsample_for_detection(self, images: torch.Tensor, device: str) -> torch.Tensor:
+        """Downsample images to max 640px for faster detection."""
+        batch_size, height, width, channels = images.shape
+        scale = 640 / max(width, height)
+        new_width = int(width * scale)
+        new_height = int(height * scale)
 
-        Uses a combination of:
-        - Intensity difference (fast baseline)
-        - Color histogram comparison (catches color/lighting changes)
-        - Structural similarity (catches structural changes)
+        print(f"[Chop Cuts] Downsampling to {new_width}x{new_height} for detection...")
+
+        pbar = ProgressBar(batch_size)
+
+        # Process in chunks to manage memory
+        chunk_size = 64 if device == 'cuda' else 16
+        result_chunks = []
+
+        for i in range(0, batch_size, chunk_size):
+            end_idx = min(i + chunk_size, batch_size)
+            chunk = images[i:end_idx]
+
+            # Convert to BCHW for common_upscale
+            chunk_bchw = chunk.permute(0, 3, 1, 2)
+            if device == 'cuda':
+                chunk_bchw = chunk_bchw.to(device)
+
+            # Downsample
+            resized = common_upscale(chunk_bchw, new_width, new_height, "lanczos", "disabled")
+
+            # Convert back to BHWC
+            resized_bhwc = resized.permute(0, 2, 3, 1)
+            if device == 'cuda':
+                resized_bhwc = resized_bhwc.cpu()
+
+            result_chunks.append(resized_bhwc)
+            pbar.update_absolute(end_idx)
+
+        detection_images = torch.cat(result_chunks, dim=0)
+        if device == 'cuda':
+            detection_images = detection_images.to(device)
+
+        return detection_images
+
+    def _detect_scenes(self, detection_images: torch.Tensor, full_images: torch.Tensor,
+                       threshold: float, min_scene_frames: int,
+                       method: str, device: str) -> List[Dict]:
         """
-        batch_size = frames.shape[0]
+        Detect scene boundaries using the specified method.
+        GPU-accelerated for intensity and hybrid methods.
+        """
+        batch_size = detection_images.shape[0]
 
         if batch_size < 2:
             return [{'start': 0, 'end': batch_size, 'length': batch_size}]
 
-        print("[Chop Cuts] Analyzing frames...")
-        pbar = ProgressBar(batch_size)
+        print(f"[Chop Cuts] Analyzing frames with {method} method...")
 
-        # Pre-compute grayscale frames
-        gray_frames = []
-        for i in range(batch_size):
-            gray = cv2.cvtColor(frames[i], cv2.COLOR_RGB2GRAY)
-            gray_frames.append(gray)
-            pbar.update_absolute(i)
+        # Adjust threshold based on method
+        if method == "intensity":
+            adjusted_threshold = threshold * 0.8
+        elif method == "histogram":
+            adjusted_threshold = threshold * 3.0
+        elif method == "adaptive":
+            adjusted_threshold = threshold  # Will be computed dynamically
+        else:  # hybrid
+            adjusted_threshold = threshold
 
         # Compute frame differences
-        differences = []
-        for i in range(1, batch_size):
-            # Intensity difference
-            diff_intensity = np.mean(cv2.absdiff(gray_frames[i], gray_frames[i-1]))
-
-            # Color histogram difference
-            diff_color = self._compute_histogram_diff(frames[i], frames[i-1])
-
-            # Structural difference (simplified SSIM-like metric)
-            diff_struct = self._compute_structural_diff(gray_frames[i], gray_frames[i-1])
-
-            # Weighted combination
-            combined = (diff_intensity * 0.4) + (diff_color * 30 * 0.3) + (diff_struct * 100 * 0.3)
-            differences.append(combined)
-
-        # Calculate adaptive threshold based on content
-        if differences:
-            mean_diff = np.mean(differences)
-            std_diff = np.std(differences)
-            # Lower sensitivity = lower threshold = more cuts detected
-            threshold = mean_diff + (sensitivity * 2.0) * std_diff
-            print(f"[Chop Cuts] Threshold: {threshold:.2f} (mean: {mean_diff:.2f}, std: {std_diff:.2f})")
+        if method == "histogram":
+            # Histogram requires CPU/OpenCV
+            differences = self._compute_histogram_differences(detection_images)
+        elif method == "adaptive":
+            # Adaptive uses intensity differences with rolling threshold
+            differences = self._compute_intensity_differences_gpu(detection_images, device)
         else:
-            threshold = 25.0
+            # GPU-accelerated for intensity and hybrid
+            if method == "hybrid":
+                differences = self._compute_hybrid_differences_gpu(detection_images, device, threshold)
+            else:
+                differences = self._compute_intensity_differences_gpu(detection_images, device)
 
-        # Detect scene boundaries
+        # Find scene boundaries
+        pbar = ProgressBar(len(differences))
+        scene_boundaries = [0]
+
+        if method == "adaptive":
+            # Adaptive threshold based on rolling window
+            window_size = 10
+            min_content_val = threshold * 0.3  # Minimum threshold floor
+
+            for i, diff in enumerate(differences):
+                # Compute local average threshold
+                start_idx = max(0, i - window_size)
+                end_idx = min(len(differences), i + window_size + 1)
+                local_avg = np.mean(differences[start_idx:end_idx])
+                adaptive_thresh = max(local_avg * 2.0, min_content_val)
+
+                if diff > adaptive_thresh:
+                    frame_idx = i + 1
+                    if (frame_idx - scene_boundaries[-1]) >= min_scene_frames:
+                        scene_boundaries.append(frame_idx)
+                        print(f"[Chop Cuts] Cut at frame {frame_idx} (diff: {diff:.2f}, thresh: {adaptive_thresh:.2f})")
+
+                pbar.update_absolute(i)
+        else:
+            # Fixed threshold methods
+            for i, diff in enumerate(differences):
+                if diff > adjusted_threshold:
+                    frame_idx = i + 1
+                    if (frame_idx - scene_boundaries[-1]) >= min_scene_frames:
+                        scene_boundaries.append(frame_idx)
+                        print(f"[Chop Cuts] Cut at frame {frame_idx} (diff: {diff:.2f})")
+
+                pbar.update_absolute(i)
+
+        # Build scene list
         scenes = []
-        current_start = 0
+        for i in range(len(scene_boundaries)):
+            start = scene_boundaries[i]
+            end = scene_boundaries[i + 1] if i + 1 < len(scene_boundaries) else batch_size
 
-        for i, diff in enumerate(differences):
-            frame_idx = i + 1  # differences[i] is between frame i and i+1
-
-            if diff > threshold:
-                scene_length = frame_idx - current_start
-                if scene_length >= min_scene_frames:
-                    scenes.append({
-                        'start': current_start,
-                        'end': frame_idx,
-                        'length': scene_length,
-                        'cut_strength': float(diff / threshold)
-                    })
-                    current_start = frame_idx
-
-        # Add final scene
-        final_length = batch_size - current_start
-        if final_length >= min_scene_frames:
-            scenes.append({
-                'start': current_start,
-                'end': batch_size,
-                'length': final_length,
-                'cut_strength': 1.0
-            })
-
-        # Validate and merge nearby cuts
-        scenes = self._validate_scenes(frames, gray_frames, scenes, min_scene_frames)
+            if end - start >= min_scene_frames:
+                scenes.append({
+                    'start': start,
+                    'end': end,
+                    'length': end - start
+                })
 
         return scenes
 
-    def _compute_histogram_diff(self, frame1: np.ndarray, frame2: np.ndarray) -> float:
-        """Compute color histogram difference between two frames."""
-        # Convert to HSV for better color comparison
-        hsv1 = cv2.cvtColor(frame1, cv2.COLOR_RGB2HSV)
-        hsv2 = cv2.cvtColor(frame2, cv2.COLOR_RGB2HSV)
+    def _compute_intensity_differences_gpu(self, images: torch.Tensor, device: str) -> np.ndarray:
+        """Compute intensity differences between consecutive frames on GPU."""
+        print("[Chop Cuts] Computing intensity differences (GPU)...")
 
-        # Calculate 2D histogram (hue + saturation)
-        hist1 = cv2.calcHist([hsv1], [0, 1], None, [16, 16], [0, 180, 0, 256])
-        hist2 = cv2.calcHist([hsv2], [0, 1], None, [16, 16], [0, 180, 0, 256])
+        # Ensure on correct device
+        if images.device.type != device:
+            images = images.to(device)
 
-        # Normalize
-        cv2.normalize(hist1, hist1, 0, 1, cv2.NORM_MINMAX)
-        cv2.normalize(hist2, hist2, 0, 1, cv2.NORM_MINMAX)
+        # Convert to grayscale using standard weights
+        # images shape: (B, H, W, C)
+        gray = 0.299 * images[..., 0] + 0.587 * images[..., 1] + 0.114 * images[..., 2]
 
-        # Bhattacharyya distance (0 = identical, 1 = completely different)
-        return float(cv2.compareHist(hist1, hist2, cv2.HISTCMP_BHATTACHARYYA))
+        # Compute differences between consecutive frames
+        diffs = torch.abs(gray[1:] - gray[:-1])
 
-    def _compute_structural_diff(self, gray1: np.ndarray, gray2: np.ndarray) -> float:
+        # Mean difference per frame pair
+        mean_diffs = diffs.mean(dim=(1, 2))
+
+        # Scale to match OpenCV absdiff range (0-255)
+        mean_diffs = mean_diffs * 255.0
+
+        return mean_diffs.cpu().numpy()
+
+    def _compute_hybrid_differences_gpu(self, images: torch.Tensor, device: str,
+                                        threshold: float) -> np.ndarray:
         """
-        Compute structural difference between two grayscale frames.
-        Simplified SSIM-like metric for speed.
+        Compute hybrid differences (intensity + edge) on GPU.
+        Uses early accept/reject for efficiency.
         """
-        # Compute local means using box filter (faster than Gaussian)
-        kernel_size = 11
-        mu1 = cv2.blur(gray1.astype(np.float32), (kernel_size, kernel_size))
-        mu2 = cv2.blur(gray2.astype(np.float32), (kernel_size, kernel_size))
+        print("[Chop Cuts] Computing hybrid differences (GPU)...")
 
-        # Compute local variances
-        mu1_sq = mu1 ** 2
-        mu2_sq = mu2 ** 2
-        mu1_mu2 = mu1 * mu2
+        if images.device.type != device:
+            images = images.to(device)
 
-        sigma1_sq = cv2.blur(gray1.astype(np.float32) ** 2, (kernel_size, kernel_size)) - mu1_sq
-        sigma2_sq = cv2.blur(gray2.astype(np.float32) ** 2, (kernel_size, kernel_size)) - mu2_sq
-        sigma12 = cv2.blur(gray1.astype(np.float32) * gray2.astype(np.float32),
-                          (kernel_size, kernel_size)) - mu1_mu2
+        batch_size = images.shape[0]
+        differences = []
 
-        # SSIM constants
-        c1 = (0.01 * 255) ** 2
-        c2 = (0.03 * 255) ** 2
+        # Convert to grayscale
+        gray = 0.299 * images[..., 0] + 0.587 * images[..., 1] + 0.114 * images[..., 2]
+        gray = gray * 255.0  # Scale to 0-255 range
 
-        # Compute SSIM
-        ssim = ((2 * mu1_mu2 + c1) * (2 * sigma12 + c2)) / \
-               ((mu1_sq + mu2_sq + c1) * (sigma1_sq + sigma2_sq + c2))
+        # Sobel kernels for edge detection
+        sobel_x = torch.tensor([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]],
+                               dtype=torch.float32, device=device).view(1, 1, 3, 3)
+        sobel_y = torch.tensor([[-1, -2, -1], [0, 0, 0], [1, 2, 1]],
+                               dtype=torch.float32, device=device).view(1, 1, 3, 3)
 
-        # Return dissimilarity (1 - SSIM)
-        return float(1 - np.mean(ssim))
+        pbar = ProgressBar(batch_size - 1)
 
-    def _validate_scenes(self, frames: np.ndarray, gray_frames: List[np.ndarray],
-                        scenes: List[Dict], min_scene_frames: int) -> List[Dict]:
-        """Validate scene cuts and merge very short gaps."""
-        if not scenes:
-            return scenes
+        for i in range(1, batch_size):
+            curr_gray = gray[i]
+            prev_gray = gray[i - 1]
 
-        validated = []
+            # Intensity difference
+            intensity_diff = torch.abs(curr_gray - prev_gray).mean().item()
 
-        for scene in scenes:
-            # Skip scenes that are too short
-            if scene['length'] < min_scene_frames:
+            # Early rejection
+            if intensity_diff < threshold * 0.3:
+                differences.append(intensity_diff)
+                pbar.update_absolute(i - 1)
                 continue
 
-            # Refine boundary if needed
-            if scene['start'] > 0:
-                # Check if boundary is at the sharpest transition
-                best_start = scene['start']
-                best_diff = 0
+            # Early acceptance
+            if intensity_diff > threshold * 3.0:
+                differences.append(intensity_diff)
+                pbar.update_absolute(i - 1)
+                continue
 
-                for offset in range(-2, 3):
-                    test_idx = scene['start'] + offset
-                    if 0 < test_idx < len(gray_frames):
-                        diff = np.mean(cv2.absdiff(gray_frames[test_idx],
-                                                   gray_frames[test_idx - 1]))
-                        if diff > best_diff:
-                            best_diff = diff
-                            best_start = test_idx
+            # Edge detection for ambiguous cases
+            curr_4d = curr_gray.unsqueeze(0).unsqueeze(0)
+            prev_4d = prev_gray.unsqueeze(0).unsqueeze(0)
 
-                scene['start'] = best_start
-                scene['length'] = scene['end'] - scene['start']
+            # Compute Sobel gradients
+            curr_gx = F.conv2d(curr_4d, sobel_x, padding=1)
+            curr_gy = F.conv2d(curr_4d, sobel_y, padding=1)
+            prev_gx = F.conv2d(prev_4d, sobel_x, padding=1)
+            prev_gy = F.conv2d(prev_4d, sobel_y, padding=1)
 
-            if scene['length'] >= min_scene_frames:
-                validated.append(scene)
+            # Edge magnitude difference
+            curr_edges = torch.sqrt(curr_gx ** 2 + curr_gy ** 2)
+            prev_edges = torch.sqrt(prev_gx ** 2 + prev_gy ** 2)
+            edge_diff = torch.abs(curr_edges - prev_edges).mean().item()
 
-        # Merge scenes with very small gaps (< 3 frames)
-        if len(validated) < 2:
-            return validated
+            # Combined score
+            combined = (intensity_diff * 0.6) + (edge_diff * 0.4)
+            differences.append(combined)
 
-        merged = [validated[0]]
-        for scene in validated[1:]:
-            gap = scene['start'] - merged[-1]['end']
-            if gap < 3:
-                # Merge with previous scene
-                merged[-1]['end'] = scene['end']
-                merged[-1]['length'] = merged[-1]['end'] - merged[-1]['start']
-            else:
-                merged.append(scene)
+            pbar.update_absolute(i - 1)
 
-        return merged
+        return np.array(differences)
+
+    def _compute_histogram_differences(self, images: torch.Tensor) -> np.ndarray:
+        """Compute histogram differences using OpenCV (CPU)."""
+        print("[Chop Cuts] Computing histogram differences (CPU)...")
+
+        # Convert to numpy
+        np_images = (images * 255).cpu().numpy().astype(np.uint8)
+        batch_size = np_images.shape[0]
+
+        differences = []
+        pbar = ProgressBar(batch_size - 1)
+
+        for i in range(1, batch_size):
+            curr_frame = np_images[i]
+            prev_frame = np_images[i - 1]
+
+            # Convert to HSV
+            curr_hsv = cv2.cvtColor(curr_frame, cv2.COLOR_RGB2HSV)
+            prev_hsv = cv2.cvtColor(prev_frame, cv2.COLOR_RGB2HSV)
+
+            # Calculate histograms
+            hist_size = [16, 16]
+            ranges = [0, 180, 0, 256]
+
+            curr_hist = cv2.calcHist([curr_hsv], [0, 1], None, hist_size, ranges)
+            prev_hist = cv2.calcHist([prev_hsv], [0, 1], None, hist_size, ranges)
+
+            # Normalize
+            cv2.normalize(curr_hist, curr_hist, 0, 1, cv2.NORM_MINMAX)
+            cv2.normalize(prev_hist, prev_hist, 0, 1, cv2.NORM_MINMAX)
+
+            # Chi-Square comparison
+            diff = cv2.compareHist(curr_hist, prev_hist, cv2.HISTCMP_CHISQR)
+            differences.append(diff)
+
+            pbar.update_absolute(i - 1)
+
+        return np.array(differences)
 
     def _export_videos(self, frames: np.ndarray, scenes: List[Dict],
                        output_folder: str, base_filename: str,
-                       fps: int, quality: int) -> List[str]:
+                       fps: int, quality: int, max_workers: int) -> List[str]:
         """Export each scene as an MP4 video using FFmpeg."""
 
         if not scenes:
@@ -289,19 +396,18 @@ Features:
         print(f"[Chop Cuts] Exporting {len(scenes)} videos...")
         pbar = ProgressBar(len(scenes))
 
-        # Calculate CRF from quality (quality 100 = CRF 1, quality 1 = CRF 51)
-        crf = str(int((100 - quality) / 2) + 1)
+        # Calculate CRF from quality
+        crf = str(int((100 - quality) / 4) + 1)
 
-        video_paths = []
         height, width = frames[0].shape[:2]
 
         def export_scene(idx: int, scene: Dict) -> Tuple[int, str, bool]:
             """Export a single scene to MP4."""
+            # Clean sequential filename - no UUID!
             filename = f"{base_filename}_{idx + 1:03d}.mp4"
             filepath = os.path.join(output_folder, filename)
 
             try:
-                # FFmpeg command for direct piping
                 cmd = [
                     "ffmpeg", "-y",
                     "-f", "rawvideo",
@@ -312,7 +418,8 @@ Features:
                     "-i", "pipe:",
                     "-c:v", "libx264",
                     "-crf", crf,
-                    "-preset", "fast",
+                    "-preset", "veryfast",
+                    "-tune", "film",
                     "-pix_fmt", "yuv420p",
                     "-movflags", "+faststart",
                     "-loglevel", "error",
@@ -345,7 +452,8 @@ Features:
                 return (idx, filepath, False)
 
         # Export videos in parallel
-        with ThreadPoolExecutor(max_workers=4) as executor:
+        actual_workers = min(max_workers, len(scenes))
+        with ThreadPoolExecutor(max_workers=actual_workers) as executor:
             futures = []
             for idx, scene in enumerate(scenes):
                 futures.append(executor.submit(export_scene, idx, scene))
