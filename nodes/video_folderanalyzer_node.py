@@ -37,7 +37,10 @@ class VideoFolderAnalyzer:
     CATEGORY = "Trent/Video"
     OUTPUT_NODE = True
 
-    def analyze_videos(self, folder_path, include_subfolders, output_format, file_extensions="mp4,avi,mov,mkv,wmv,flv,webm,m4v,mpg,mpeg"):
+    def analyze_videos(
+        self, folder_path, include_subfolders, output_format,
+        file_extensions="mp4,avi,mov,mkv,wmv,flv,webm,m4v,mpg,mpeg"
+    ):
         """
         Main function to analyze all videos in the specified folder
         """
@@ -92,7 +95,9 @@ class VideoFolderAnalyzer:
         
         return (report, json_data)
     
-    def collect_video_files(self, folder_path, extensions, include_subfolders):
+    def collect_video_files(
+        self, folder_path, extensions, include_subfolders
+    ):
         """
         Collect all video files from the folder
         """
@@ -121,7 +126,8 @@ class VideoFolderAnalyzer:
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             
-            # If frame count is invalid, try to count manually (slower but more accurate)
+            # If frame count is invalid, try to count manually
+            # (slower but more accurate)
             if frame_count <= 0:
                 frame_count = 0
                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -142,7 +148,9 @@ class VideoFolderAnalyzer:
             
             # Get codec information
             fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
-            codec = "".join([chr((fourcc >> 8 * i) & 0xFF) for i in range(4)])
+            codec = "".join(
+                [chr((fourcc >> 8 * i) & 0xFF) for i in range(4)]
+            )
             
             return {
                 'filename': video_path.name,
@@ -158,7 +166,10 @@ class VideoFolderAnalyzer:
                 'duration_formatted': duration_formatted,
                 'size_bytes': file_size,
                 'size_readable': self.format_file_size(file_size),
-                'bitrate_kbps': round((file_size * 8) / (duration_seconds * 1000), 2) if duration_seconds > 0 else 0
+                'bitrate_kbps': (
+                    round((file_size * 8) / (duration_seconds * 1000), 2)
+                    if duration_seconds > 0 else 0
+                )
             }
         finally:
             cap.release()
@@ -191,7 +202,7 @@ class VideoFolderAnalyzer:
         Generate a Markdown formatted report
         """
         report = []
-        report.append("# 📹 Video Folder Analysis Report")
+        report.append("# Video Folder Analysis Report")
         report.append(f"\n**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         report.append(f"**Total Videos:** {len(video_data)}")
         report.append(f"**Total Size:** {self.format_file_size(total_size)}")
@@ -201,19 +212,29 @@ class VideoFolderAnalyzer:
             total_frames = sum(v['frame_count'] for v in video_data)
             report.append(f"**Total Frames:** {total_frames:,}")
             
-            report.append("\n## 📊 Video Files Summary\n")
-            report.append("| File | Type | Resolution | FPS | Frames | Duration | Size | Bitrate |")
-            report.append("|------|------|------------|-----|--------|----------|------|---------|")
-            
+            report.append("\n## Video Files Summary\n")
+            report.append(
+                "| File | Type | Resolution | FPS | Frames | "
+                "Duration | Size | Bitrate |"
+            )
+            report.append(
+                "|------|------|------------|-----|--------|"
+                "----------|------|---------|"
+            )
+
             for video in video_data:
-                report.append(f"| {video['filename'][:25]} | {video['file_type']} | "
-                            f"{video['resolution']} | {video['fps']} | "
-                            f"{video['frame_count']:,} | "
-                            f"{video['duration_formatted']} | {video['size_readable']} | "
-                            f"{video['bitrate_kbps']} kbps |")
+                row = (
+                    f"| {video['filename'][:25]} | {video['file_type']} | "
+                    f"{video['resolution']} | {video['fps']} | "
+                    f"{video['frame_count']:,} | "
+                    f"{video['duration_formatted']} | "
+                    f"{video['size_readable']} | "
+                    f"{video['bitrate_kbps']} kbps |"
+                )
+                report.append(row)
             
             # Statistics
-            report.append("\n## 📈 Statistics\n")
+            report.append("\n## Statistics\n")
             
             # Resolution distribution
             resolutions = {}
@@ -222,7 +243,10 @@ class VideoFolderAnalyzer:
                 resolutions[res] = resolutions.get(res, 0) + 1
             
             report.append("### Resolution Distribution")
-            for res, count in sorted(resolutions.items(), key=lambda x: x[1], reverse=True):
+            sorted_res = sorted(
+                resolutions.items(), key=lambda x: x[1], reverse=True
+            )
+            for res, count in sorted_res:
                 report.append(f"- {res}: {count} video(s)")
             
             # File type distribution
@@ -232,26 +256,31 @@ class VideoFolderAnalyzer:
                 file_types[ft] = file_types.get(ft, 0) + 1
             
             report.append("\n### File Type Distribution")
-            for ft, count in sorted(file_types.items(), key=lambda x: x[1], reverse=True):
+            sorted_ft = sorted(
+                file_types.items(), key=lambda x: x[1], reverse=True
+            )
+            for ft, count in sorted_ft:
                 report.append(f"- {ft}: {count} video(s)")
             
             # FPS statistics
             fps_values = [v['fps'] for v in video_data]
-            report.append(f"\n### Frame Rate Statistics")
-            report.append(f"- Average FPS: {sum(fps_values)/len(fps_values):.2f}")
+            report.append("\n### Frame Rate Statistics")
+            avg_fps = sum(fps_values) / len(fps_values)
+            report.append(f"- Average FPS: {avg_fps:.2f}")
             report.append(f"- Min FPS: {min(fps_values):.2f}")
             report.append(f"- Max FPS: {max(fps_values):.2f}")
             
             # Frame count statistics
             frame_counts = [v['frame_count'] for v in video_data]
-            report.append(f"\n### Frame Count Statistics")
+            report.append("\n### Frame Count Statistics")
             report.append(f"- Total Frames: {sum(frame_counts):,}")
-            report.append(f"- Average Frames per Video: {sum(frame_counts)//len(frame_counts):,}")
+            avg_frames = sum(frame_counts) // len(frame_counts)
+            report.append(f"- Average Frames per Video: {avg_frames:,}")
             report.append(f"- Min Frames: {min(frame_counts):,}")
             report.append(f"- Max Frames: {max(frame_counts):,}")
         
         if errors:
-            report.append("\n## ⚠️ Errors\n")
+            report.append("\n## Errors\n")
             for error in errors:
                 report.append(f"- **{error['file']}**: {error['error']}")
         
@@ -279,9 +308,18 @@ class VideoFolderAnalyzer:
             for i, video in enumerate(video_data, 1):
                 report.append(f"\n[{i}] {video['filename']}")
                 report.append(f"    Type: {video['file_type']} | Codec: {video['codec']}")
-                report.append(f"    Resolution: {video['resolution']} | FPS: {video['fps']}")
-                report.append(f"    Frames: {video['frame_count']:,} | Duration: {video['duration_formatted']}")
-                report.append(f"    Size: {video['size_readable']} | Bitrate: {video['bitrate_kbps']} kbps")
+                report.append(
+                    f"    Resolution: {video['resolution']} | "
+                    f"FPS: {video['fps']}"
+                )
+                report.append(
+                    f"    Frames: {video['frame_count']:,} | "
+                    f"Duration: {video['duration_formatted']}"
+                )
+                report.append(
+                    f"    Size: {video['size_readable']} | "
+                    f"Bitrate: {video['bitrate_kbps']} kbps"
+                )
         
         if errors:
             report.append("\n" + "=" * 80)
@@ -303,7 +341,9 @@ class VideoFolderAnalyzer:
             "total_videos": len(video_data),
             "total_size_bytes": total_size,
             "total_size_readable": self.format_file_size(total_size),
-            "total_frames": sum(v['frame_count'] for v in video_data) if video_data else 0,
+            "total_frames": (
+                sum(v['frame_count'] for v in video_data) if video_data else 0
+            ),
             "videos": video_data,
             "errors": errors,
             "statistics": {

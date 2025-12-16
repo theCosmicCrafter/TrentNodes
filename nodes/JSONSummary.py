@@ -1,5 +1,6 @@
 """
-JSON ➜ Multi-Line Summary · ComfyUI custom node
+JSON to Multi-Line Summary - ComfyUI custom node
+
 - Accepts dict or raw-JSON string
 - Supports sub_path with bracket indexing, e.g. "loras[0]" or "foo.bar[2][1]"
 - If the resolved target is a list, it falls back to the first item (if any)
@@ -108,4 +109,4 @@ class JSONSummary:
 
 # ---- ComfyUI discovery ----
 NODE_CLASS_MAPPINGS = {"JSONSummary": JSONSummary}
-NODE_DISPLAY_NAME_MAPPINGS = {"JSONSummary": "JSON ➜ Multi-Line Summary"}
+NODE_DISPLAY_NAME_MAPPINGS = {"JSONSummary": "JSON to Multi-Line Summary"}

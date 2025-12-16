@@ -50,14 +50,18 @@ class LatestVideoFinalFrameNode:
     # A unique identifier for this node type
     FUNCTION = "extract_final_frame"
 
-    def extract_final_frame(self, directory_path, recursive_search, video_extensions):
+    def extract_final_frame(
+        self, directory_path, recursive_search, video_extensions
+    ):
         """
         Main function that performs the video processing.
         This is where the actual work happens.
         """
         try:
-            # First, let's find all video files in the specified directory
-            video_files = self._find_video_files(directory_path, recursive_search, video_extensions)
+            # Find all video files in the specified directory
+            video_files = self._find_video_files(
+                directory_path, recursive_search, video_extensions
+            )
             
             if not video_files:
                 # If no videos found, create a black placeholder image
@@ -83,17 +87,24 @@ class LatestVideoFinalFrameNode:
             placeholder = self._create_placeholder_image(error_msg)
             return (placeholder, error_msg)
     
-    def _find_video_files(self, directory_path, recursive_search, video_extensions):
+    def _find_video_files(
+        self, directory_path, recursive_search, video_extensions
+    ):
         """
         Helper method to find all video files in the directory.
         This separates the file-finding logic for better organization.
         """
         if not os.path.exists(directory_path):
-            raise FileNotFoundError(f"Directory does not exist: {directory_path}")
+            raise FileNotFoundError(
+                f"Directory does not exist: {directory_path}"
+            )
         
         # Parse the extensions string into a list
         # We strip whitespace and convert to lowercase for consistency
-        extensions = [ext.strip().lower().lstrip('.') for ext in video_extensions.split(',')]
+        extensions = [
+            ext.strip().lower().lstrip('.')
+            for ext in video_extensions.split(',')
+        ]
         
         video_files = []
         
@@ -161,13 +172,15 @@ class LatestVideoFinalFrameNode:
         # Convert PIL image to numpy array
         image_array = np.array(pil_image).astype(np.float32) / 255.0
         
-        # ComfyUI expects images in the format [batch, height, width, channels]
+        # ComfyUI expects images as [batch, height, width, channels]
         # Add batch dimension at the beginning
         image_tensor = torch.from_numpy(image_array)[None,]
         
         return image_tensor
     
-    def _create_placeholder_image(self, message, width=512, height=512):
+    def _create_placeholder_image(
+        self, message, width=512, height=512
+    ):
         """
         Create a placeholder image with text when something goes wrong.
         This provides visual feedback in the ComfyUI interface.
@@ -183,12 +196,16 @@ class LatestVideoFinalFrameNode:
         thickness = 2
         
         # Calculate text size to center it
-        text_size = cv2.getTextSize(message, font, font_scale, thickness)[0]
+        text_size = cv2.getTextSize(
+            message, font, font_scale, thickness
+        )[0]
         text_x = (width - text_size[0]) // 2
         text_y = (height + text_size[1]) // 2
-        
-        cv2.putText(placeholder, message, (text_x, text_y), 
-                   font, font_scale, color, thickness)
+
+        cv2.putText(
+            placeholder, message, (text_x, text_y),
+            font, font_scale, color, thickness
+        )
         
         # Convert to ComfyUI format
         return self._opencv_to_comfyui_image(placeholder)

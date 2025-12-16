@@ -5,9 +5,120 @@ Automatically creates properly blocky masks aligned to VAE latent space
 
 import torch
 import torch.nn.functional as F
-import numpy as np
 
-class LatentAlignedMask:
+
+class LatentMaskProcessor:
+    """
+    Base class providing shared latent-space mask processing logic.
+
+    Provides a single implementation for latent-aligned mask operations
+    that can be reused across different node variants.
+    """
+
+    @staticmethod
+    def process_mask_latent(
+        mask: torch.Tensor,
+        compression: int,
+        expansion_pixels: int = 8,
+        blur_latent_units: int = 1,
+        threshold: float = 0.5
+    ) -> tuple:
+        """
+        Core mask processing aligned to VAE latent space.
+
+        Args:
+            mask: Input mask tensor (B, H, W) or (H, W)
+            compression: VAE spatial compression factor
+            expansion_pixels: Pixels to expand in LATENT space
+            blur_latent_units: Blur radius in latent space units
+            threshold: Binary threshold after processing
+
+        Returns:
+            Tuple of (aligned_mask, latent_preview)
+        """
+        # Track original dimensions
+        orig_dim = mask.dim()
+
+        # Ensure mask is 4D (B, 1, H, W)
+        if mask.dim() == 2:
+            mask = mask.unsqueeze(0).unsqueeze(0)
+        elif mask.dim() == 3:
+            mask = mask.unsqueeze(1)
+
+        original_shape = mask.shape
+        device = mask.device
+        dtype = mask.dtype
+
+        # Step 1: Downsample to latent resolution
+        latent_h = original_shape[2] // compression
+        latent_w = original_shape[3] // compression
+
+        mask_latent = F.interpolate(
+            mask.float(),
+            size=(latent_h, latent_w),
+            mode='area'
+        )
+
+        # Step 2: Expand mask in latent space (prevents black edges)
+        if expansion_pixels > 0:
+            kernel_size = expansion_pixels * 2 + 1
+            padding = expansion_pixels
+            mask_expanded = F.max_pool2d(
+                mask_latent,
+                kernel_size=kernel_size,
+                stride=1,
+                padding=padding
+            )
+            mask_latent = torch.clamp(mask_expanded, 0, 1)
+
+        # Step 3: Blur in latent space (softens boundaries)
+        if blur_latent_units > 0:
+            kernel_size = blur_latent_units * 2 + 1
+            sigma = blur_latent_units / 2
+
+            # Create Gaussian kernel
+            x = torch.arange(
+                kernel_size, device=device, dtype=torch.float32
+            ) - kernel_size // 2
+            gauss_1d = torch.exp(-x.pow(2) / (2 * sigma ** 2))
+            gauss_1d = gauss_1d / gauss_1d.sum()
+
+            gauss_2d = gauss_1d.view(-1, 1) * gauss_1d.view(1, -1)
+            gauss_kernel = gauss_2d.view(1, 1, kernel_size, kernel_size)
+
+            padding = kernel_size // 2
+            mask_latent = F.conv2d(mask_latent, gauss_kernel, padding=padding)
+
+        # Step 4: Apply threshold in latent space
+        mask_latent_binary = (mask_latent >= threshold).float()
+
+        # Step 5: Upsample back to original resolution using NEAREST neighbor
+        mask_aligned = F.interpolate(
+            mask_latent_binary,
+            size=(original_shape[2], original_shape[3]),
+            mode='nearest'
+        )
+
+        # Create preview of latent space
+        latent_preview = F.interpolate(
+            mask_latent,
+            size=(original_shape[2], original_shape[3]),
+            mode='nearest'
+        )
+
+        # Convert back to original format
+        mask_aligned = mask_aligned.squeeze(1).to(dtype)
+        latent_preview = latent_preview.squeeze(1).to(dtype)
+
+        # If input was 2D, return 2D
+        if orig_dim == 2:
+            mask_aligned = mask_aligned.squeeze(0)
+            latent_preview = latent_preview.squeeze(0)
+
+        return mask_aligned, latent_preview
+
+
+class LatentAlignedMask(LatentMaskProcessor):
     """
     Creates masks aligned to VAE latent space to prevent black spots and artifacts.
     Automatically calculates the correct blockiness based on VAE compression.
@@ -140,113 +251,36 @@ class LatentAlignedMask:
             print(f"[LatentAlignedMask] Error detecting compression, defaulting to 8x: {e}")
             return 8
     
-    def align_mask(self, mask, vae, expansion_pixels=8, blur_latent_units=1, 
+    def align_mask(self, mask, vae, expansion_pixels=8, blur_latent_units=1,
                    threshold=0.5, override_compression=0):
         """
-        Process mask to align with VAE latent space
-        
+        Process mask to align with VAE latent space.
+
         Args:
             mask: Input mask tensor (B, H, W) or (H, W)
             vae: VAE model to get compression factor
-            expansion_pixels: Pixels to expand in LATENT space (prevents black edges)
+            expansion_pixels: Pixels to expand in LATENT space
             blur_latent_units: Blur radius in latent space units
             threshold: Binary threshold after processing
             override_compression: Manual compression factor (0=auto)
         """
-        
         # Get compression factor
         if override_compression > 0:
             compression = override_compression
         else:
             compression = self.get_vae_compression_factor(vae)
-        
-        # Ensure mask is 4D (B, 1, H, W)
-        if mask.dim() == 2:
-            mask = mask.unsqueeze(0).unsqueeze(0)
-        elif mask.dim() == 3:
-            mask = mask.unsqueeze(1)
-        
-        original_shape = mask.shape
-        device = mask.device
-        dtype = mask.dtype
-        
-        # Step 1: Downsample to latent resolution
-        latent_h = original_shape[2] // compression
-        latent_w = original_shape[3] // compression
-        
-        # Use area averaging for downsampling (preserves coverage)
-        mask_latent = F.interpolate(
-            mask.float(),
-            size=(latent_h, latent_w),
-            mode='area'
+
+        # Use shared processing method
+        mask_aligned, latent_preview = self.process_mask_latent(
+            mask, compression, expansion_pixels, blur_latent_units, threshold
         )
-        
-        # Step 2: Expand mask in latent space (prevents black edges)
-        if expansion_pixels > 0:
-            # Create expansion kernel
-            kernel_size = expansion_pixels * 2 + 1
-            kernel = torch.ones(1, 1, kernel_size, kernel_size, device=device) / (kernel_size ** 2)
-            
-            # Dilate using max pooling approach
-            padding = expansion_pixels
-            mask_expanded = F.max_pool2d(
-                mask_latent,
-                kernel_size=kernel_size,
-                stride=1,
-                padding=padding
-            )
-            mask_latent = torch.clamp(mask_expanded, 0, 1)
-        
-        # Step 3: Blur in latent space (softens boundaries)
-        if blur_latent_units > 0:
-            kernel_size = blur_latent_units * 2 + 1
-            sigma = blur_latent_units / 2
-            
-            # Create Gaussian kernel
-            x = torch.arange(kernel_size, device=device, dtype=torch.float32) - kernel_size // 2
-            gauss_1d = torch.exp(-x.pow(2) / (2 * sigma ** 2))
-            gauss_1d = gauss_1d / gauss_1d.sum()
-            
-            gauss_2d = gauss_1d.view(-1, 1) * gauss_1d.view(1, -1)
-            gauss_kernel = gauss_2d.view(1, 1, kernel_size, kernel_size)
-            
-            # Apply Gaussian blur
-            padding = kernel_size // 2
-            mask_latent = F.conv2d(mask_latent, gauss_kernel, padding=padding)
-        
-        # Step 4: Apply threshold in latent space
-        mask_latent_binary = (mask_latent >= threshold).float()
-        
-        # Step 5: Upsample back to original resolution using NEAREST neighbor
-        # This preserves the blockiness which is what we want!
-        mask_aligned = F.interpolate(
-            mask_latent_binary,
-            size=(original_shape[2], original_shape[3]),
-            mode='nearest'
-        )
-        
-        # Create a preview of what the latent space sees (for debugging)
-        latent_preview = F.interpolate(
-            mask_latent,
-            size=(original_shape[2], original_shape[3]),
-            mode='nearest'
-        )
-        
-        # Convert back to original format
-        mask_aligned = mask_aligned.squeeze(1).to(dtype)  # (B, H, W)
-        latent_preview = latent_preview.squeeze(1).to(dtype)
-        
-        # If input was 2D, return 2D
-        if len(original_shape) == 2:
-            mask_aligned = mask_aligned.squeeze(0)
-            latent_preview = latent_preview.squeeze(0)
-        
+
         return (mask_aligned, latent_preview, compression)
 
 
-class LatentAlignedMaskAdvanced:
+class LatentAlignedMaskAdvanced(LatentMaskProcessor):
     """
-    Advanced version with character detection and smart expansion
+    Advanced version with character detection and smart expansion.
     """
     
     @classmethod
@@ -313,13 +347,12 @@ class LatentAlignedMaskAdvanced:
         return (mask_aligned, info)
 
 
-# Node registration
-class LatentAlignedMaskSimple:
+class LatentAlignedMaskSimple(LatentMaskProcessor):
     """
     Simplified version that doesn't require VAE input.
     Just specify compression factor directly (8 for Wan/SD models).
     """
-    
+
     @classmethod
     def INPUT_TYPES(cls):
         return {
@@ -330,7 +363,7 @@ class LatentAlignedMaskSimple:
                     "min": 1,
                     "max": 16,
                     "step": 1,
-                    "tooltip": "Spatial compression (8 for Wan/SD, 4 for some others)"
+                    "tooltip": "Spatial compression (8 for Wan/SD, 4 for others)"
                 }),
                 "expansion_pixels": ("INT", {
                     "default": 8,
@@ -358,94 +391,22 @@ class LatentAlignedMaskSimple:
                 }),
             }
         }
-    
+
     RETURN_TYPES = ("MASK", "MASK")
     RETURN_NAMES = ("aligned_mask", "latent_preview")
     FUNCTION = "align_mask"
     CATEGORY = "Trent/Masks"
-    
-    def align_mask(self, mask, compression_factor=8, expansion_pixels=8, 
+
+    def align_mask(self, mask, compression_factor=8, expansion_pixels=8,
                    blur_latent_units=1, threshold=0.5):
-        """
-        Process mask to align with latent space (no VAE needed)
-        """
-        
-        # Ensure mask is 4D (B, 1, H, W)
-        if mask.dim() == 2:
-            mask = mask.unsqueeze(0).unsqueeze(0)
-        elif mask.dim() == 3:
-            mask = mask.unsqueeze(1)
-        
-        original_shape = mask.shape
-        device = mask.device
-        dtype = mask.dtype
-        
-        # Step 1: Downsample to latent resolution
-        latent_h = original_shape[2] // compression_factor
-        latent_w = original_shape[3] // compression_factor
-        
-        mask_latent = F.interpolate(
-            mask.float(),
-            size=(latent_h, latent_w),
-            mode='area'
+        """Process mask to align with latent space (no VAE needed)."""
+        mask_aligned, latent_preview = self.process_mask_latent(
+            mask, compression_factor, expansion_pixels, blur_latent_units, threshold
         )
-        
-        # Step 2: Expand in latent space
-        if expansion_pixels > 0:
-            kernel_size = expansion_pixels * 2 + 1
-            padding = expansion_pixels
-            mask_expanded = F.max_pool2d(
-                mask_latent,
-                kernel_size=kernel_size,
-                stride=1,
-                padding=padding
-            )
-            mask_latent = torch.clamp(mask_expanded, 0, 1)
-        
-        # Step 3: Blur in latent space
-        if blur_latent_units > 0:
-            kernel_size = blur_latent_units * 2 + 1
-            sigma = blur_latent_units / 2
-            
-            x = torch.arange(kernel_size, device=device, dtype=torch.float32) - kernel_size // 2
-            gauss_1d = torch.exp(-x.pow(2) / (2 * sigma ** 2))
-            gauss_1d = gauss_1d / gauss_1d.sum()
-            
-            gauss_2d = gauss_1d.view(-1, 1) * gauss_1d.view(1, -1)
-            gauss_kernel = gauss_2d.view(1, 1, kernel_size, kernel_size)
-            
-            padding = kernel_size // 2
-            mask_latent = F.conv2d(mask_latent, gauss_kernel, padding=padding)
-        
-        # Step 4: Threshold
-        mask_latent_binary = (mask_latent >= threshold).float()
-        
-        # Step 5: Upsample back using NEAREST neighbor (blocky!)
-        mask_aligned = F.interpolate(
-            mask_latent_binary,
-            size=(original_shape[2], original_shape[3]),
-            mode='nearest'
-        )
-        
-        # Preview
-        latent_preview = F.interpolate(
-            mask_latent,
-            size=(original_shape[2], original_shape[3]),
-            mode='nearest'
-        )
-        
-        # Convert back
-        mask_aligned = mask_aligned.squeeze(1).to(dtype)
-        latent_preview = latent_preview.squeeze(1).to(dtype)
-        
-        if len(original_shape) == 2:
-            mask_aligned = mask_aligned.squeeze(0)
-            latent_preview = latent_preview.squeeze(0)
-        
         return (mask_aligned, latent_preview)
 
 
-class LatentAlignedMaskWan:
+class LatentAlignedMaskWan(LatentMaskProcessor):
     """
     Optimized version specifically for Wan 2.1 VAE.
     Hardcoded for 8x spatial compression with sane defaults.
@@ -485,90 +446,29 @@ class LatentAlignedMaskWan:
     CATEGORY = "Trent/Masks"
     
     def align_mask(self, mask, preset="standard", expansion_pixels=64, blur_pixels=8):
-        """
-        Process mask for Wan 2.1 VAE (8x compression, optimized settings)
-        """
-        
+        """Process mask for Wan 2.1 VAE (8x compression, optimized settings)."""
         # Wan 2.1 VAE always uses 8x spatial compression
         compression_factor = 8
-        
+
         # Presets in PIXEL space for intuitive understanding
         presets = {
-            "tight": {"expansion_px": 32, "blur_px": 0},      # Minimal expansion, sharp
-            "standard": {"expansion_px": 64, "blur_px": 8},   # Balanced (default)
-            "loose": {"expansion_px": 96, "blur_px": 16},     # Maximum coverage, soft
-            "custom": {"expansion_px": expansion_pixels, "blur_px": blur_pixels}  # User defined
+            "tight": {"expansion_px": 32, "blur_px": 0},
+            "standard": {"expansion_px": 64, "blur_px": 8},
+            "loose": {"expansion_px": 96, "blur_px": 16},
+            "custom": {"expansion_px": expansion_pixels, "blur_px": blur_pixels}
         }
-        
+
         params = presets[preset]
-        
+
         # Convert pixel-space to latent-space (divide by compression factor)
         expansion_latent = params["expansion_px"] // compression_factor
         blur_latent = params["blur_px"] // compression_factor
-        
-        # Ensure mask is 4D (B, 1, H, W)
-        if mask.dim() == 2:
-            mask = mask.unsqueeze(0).unsqueeze(0)
-        elif mask.dim() == 3:
-            mask = mask.unsqueeze(1)
-        
-        original_shape = mask.shape
-        device = mask.device
-        dtype = mask.dtype
-        
-        # Step 1: Downsample to latent resolution (8x compression)
-        latent_h = original_shape[2] // compression_factor
-        latent_w = original_shape[3] // compression_factor
-        
-        mask_latent = F.interpolate(
-            mask.float(),
-            size=(latent_h, latent_w),
-            mode='area'
+
+        # Use shared processing method (returns aligned_mask, latent_preview)
+        mask_aligned, _ = self.process_mask_latent(
+            mask, compression_factor, expansion_latent, blur_latent, threshold=0.5
         )
-        
-        # Step 2: Expand in latent space
-        if expansion_latent > 0:
-            kernel_size = expansion_latent * 2 + 1
-            padding = expansion_latent
-            mask_expanded = F.max_pool2d(
-                mask_latent,
-                kernel_size=kernel_size,
-                stride=1,
-                padding=padding
-            )
-            mask_latent = torch.clamp(mask_expanded, 0, 1)
-        
-        # Step 3: Blur in latent space
-        if blur_latent > 0:
-            kernel_size = blur_latent * 2 + 1
-            sigma = blur_latent / 2
-            
-            x = torch.arange(kernel_size, device=device, dtype=torch.float32) - kernel_size // 2
-            gauss_1d = torch.exp(-x.pow(2) / (2 * sigma ** 2))
-            gauss_1d = gauss_1d / gauss_1d.sum()
-            
-            gauss_2d = gauss_1d.view(-1, 1) * gauss_1d.view(1, -1)
-            gauss_kernel = gauss_2d.view(1, 1, kernel_size, kernel_size)
-            
-            padding = kernel_size // 2
-            mask_latent = F.conv2d(mask_latent, gauss_kernel, padding=padding)
-        
-        # Step 4: Threshold at 0.5
-        mask_latent_binary = (mask_latent >= 0.5).float()
-        
-        # Step 5: Upsample back using NEAREST neighbor (preserves blockiness)
-        mask_aligned = F.interpolate(
-            mask_latent_binary,
-            size=(original_shape[2], original_shape[3]),
-            mode='nearest'
-        )
-        
-        # Convert back to original format
-        mask_aligned = mask_aligned.squeeze(1).to(dtype)
-        
-        if len(original_shape) == 2:
-            mask_aligned = mask_aligned.squeeze(0)
-        
+
         return (mask_aligned,)
 
 
