@@ -289,3 +289,44 @@ def get_mask_area(mask: torch.Tensor) -> float:
         mask = mask[0]
 
     return (mask > 0.5).float().sum().item()
+
+
+def batch_get_centroids(masks: torch.Tensor) -> torch.Tensor:
+    """
+    GPU-accelerated batch centroid calculation for multiple masks.
+
+    Computes center of mass for all masks in a single batch operation,
+    avoiding Python loops for significant speedup.
+
+    Args:
+        masks: Tensor of shape (B, H, W) where B is batch size
+
+    Returns:
+        Tensor of shape (B, 2) with [cy, cx] for each mask
+    """
+    if masks.dim() == 2:
+        masks = masks.unsqueeze(0)
+
+    B, H, W = masks.shape
+    device = masks.device
+
+    # Binary threshold
+    mask_binary = (masks > 0.5).float()
+
+    # Sum per mask for normalization
+    mask_sums = mask_binary.view(B, -1).sum(dim=1, keepdim=True) + 1e-6
+
+    # Create coordinate grids (shared across batch)
+    y_coords = torch.arange(H, device=device, dtype=torch.float32)
+    x_coords = torch.arange(W, device=device, dtype=torch.float32)
+
+    # Compute weighted sums for all masks at once
+    # cy = sum(mask * y) / sum(mask)
+    cy = (mask_binary * y_coords.view(1, -1, 1)).view(B, -1).sum(dim=1)
+    cx = (mask_binary * x_coords.view(1, 1, -1)).view(B, -1).sum(dim=1)
+
+    # Normalize
+    cy = cy / mask_sums.squeeze(1)
+    cx = cx / mask_sums.squeeze(1)
+
+    return torch.stack([cy, cx], dim=1)

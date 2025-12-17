@@ -91,8 +91,60 @@ Creates precision masks aligned to latent space dimensions. Ensures proper mask 
 
 ### 🎬 Trent/Keyframes (1 node)
 
-**Wan Vace Keyframe Builder**  
+**Wan Vace Keyframe Builder**
 Dynamic keyframe sequencing for Wan Vace video generation. Features interactive UI with drag-and-drop image inputs, frame-accurate positioning, automatic resizing, and synchronized mask generation. Supports up to 256 frames with customizable filler frames.
+
+### 🎤 Trent/LipSync (9 nodes)
+
+Complete lip sync pipeline for non-human character animation. Converts audio to mouth shapes and composites them onto tracked positions in video frames.
+
+**Audio To Phonemes**
+Extracts phonemes from audio using Vosk speech recognition. Returns timestamped phoneme data for mouth shape mapping. Automatically downloads the required Vosk model on first use.
+
+**Phoneme To Mouth Shapes**
+Converts phoneme data to a sequence of mouth shape indices (A-H + X for silence). Maps speech sounds to the 9 standard mouth positions used in animation.
+
+**Mouth Shape Loader**
+Loads 9 mouth shape images from a folder. Expects files named A.png through H.png plus X.png (silence). Validates all shapes are present and correctly sized.
+
+**Mouth Shape Preview**
+Previews mouth shapes with their corresponding phoneme labels. Useful for verifying mouth shape assets before use.
+
+**Mouth Shape Compositor**
+Basic compositor that places mouth shapes on frames at a fixed position. Use for static characters or simple animations.
+
+**Mouth Shape Compositor (Tracked)**
+Advanced compositor with tracking support. Places mouth shapes at positions determined by either:
+- **Point tracking**: Use tracked (x,y) coordinates from Point Tracker
+- **Mask tracking**: Use per-frame masks from SAM3 to find mouth centroids
+
+Features BiRefNet background removal, scaling, offset adjustment, and optional RGBA output for further compositing.
+
+**Point Tracker**
+Robust point tracking using pyramidal Lucas-Kanade optical flow. Click a point on frame 1 and track it through the entire video. Features:
+- Sub-pixel accuracy with Scharr gradients
+- Multi-stage recovery (adaptive template, original template, full-frame search)
+- Periodic drift validation against original template
+- GPU-accelerated template matching for large search areas
+- Configurable window size up to 1025px for full-frame tracking
+
+**Point Preview**
+Click-to-pick interface for selecting the initial tracking point. Click anywhere on the image to set coordinates, which pass directly to Point Tracker.
+
+**Points To Masks**
+Converts point sequences to gaussian masks for use with mask-based compositing.
+
+**Remove Mouth Background**
+Standalone background removal using BiRefNet or color keying. Returns mouth shapes with alpha channel for custom compositing workflows.
+
+#### LipSync Workflow
+
+1. **Audio To Phonemes** - Extract speech from audio
+2. **Phoneme To Mouth Shapes** - Convert to mouth indices
+3. **Mouth Shape Loader** - Load your 9 mouth images
+4. **Point Preview** - Click to select tracking point
+5. **Point Tracker** - Track the point through video
+6. **Mouth Shape Compositor (Tracked)** - Composite mouths onto frames
 
 ## Requirements
 
@@ -103,10 +155,12 @@ Dynamic keyframe sequencing for Wan Vace video generation. Features interactive 
 - pillow >= 10.0.0
 - matplotlib >= 3.7.0
 - colorama >= 0.4.6
+- vosk >= 0.3.45 (for lip sync speech recognition)
+- transformers >= 4.36.0 (for BiRefNet background removal)
 
 ## Features
 
-✅ **19 professional nodes** for video and image workflows  
+✅ **28 professional nodes** for video, image, and lip sync workflows  
 ✅ **Organized categories** - all nodes under `Trent/` namespace  
 ✅ **Auto-discovery** - drop nodes in `nodes/` folder and restart  
 ✅ **Colorful startup banner** with load validation  

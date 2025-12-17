@@ -2,114 +2,17 @@
 Model loading and caching utilities for TrentNodes.
 
 Provides cached model loading for commonly used models:
-- BiRefNet (BEN2) for subject segmentation
 - SD 1.5 Inpainting model
+
+Note: BiRefNet is now handled by birefnet_wrapper.py using
+the official Hugging Face transformers implementation.
 """
 
 import os
-import sys
 
 import torch
 
 import folder_paths
-
-
-# BiRefNet (BEN2) model cache
-_birefnet_model = None
-_birefnet_device = None
-_birefnet_available = None
-
-
-def is_birefnet_available() -> bool:
-    """
-    Check if BiRefNet can be loaded (without actually loading it).
-
-    Returns:
-        True if ComfyUI-Easy-Use is installed with BiRefNet support
-    """
-    global _birefnet_available
-
-    if _birefnet_available is not None:
-        return _birefnet_available
-
-    easy_use_path = os.path.join(
-        folder_paths.base_path,
-        "custom_nodes", "ComfyUI-Easy-Use", "py"
-    )
-    ben_model_path = os.path.join(
-        easy_use_path, "modules", "ben", "model.py"
-    )
-
-    if os.path.exists(ben_model_path):
-        _birefnet_available = True
-    else:
-        _birefnet_available = False
-        print(
-            "[TrentNodes] Note: BiRefNet requires "
-            "ComfyUI-Easy-Use to be installed."
-        )
-
-    return _birefnet_available
-
-
-def load_birefnet(device: torch.device):
-    """
-    Load BiRefNet (BEN2) model for high-quality subject segmentation.
-
-    Model is cached for reuse across calls.
-
-    Args:
-        device: torch device to load model on
-
-    Returns:
-        BiRefNet model or None if not available
-    """
-    global _birefnet_model, _birefnet_device, _birefnet_available
-
-    # Return cached model if available and on correct device
-    if _birefnet_model is not None and _birefnet_device == device:
-        return _birefnet_model
-
-    try:
-        # Add ComfyUI-Easy-Use to path if needed
-        easy_use_path = os.path.join(
-            folder_paths.base_path,
-            "custom_nodes", "ComfyUI-Easy-Use", "py"
-        )
-        if easy_use_path not in sys.path:
-            sys.path.insert(0, easy_use_path)
-
-        from modules.ben.model import BEN_Base
-
-        # Model path
-        model_dir = os.path.join(folder_paths.models_dir, "rembg")
-        model_path = os.path.join(model_dir, "BEN2_Base.pth")
-
-        if not os.path.exists(model_path):
-            from torch.hub import download_url_to_file
-            os.makedirs(model_dir, exist_ok=True)
-            url = (
-                "https://huggingface.co/PramaLLC/BEN2/"
-                "resolve/main/BEN2_Base.pth"
-            )
-            print("[TrentNodes] Downloading BiRefNet (~500MB)...")
-            download_url_to_file(url, model_path)
-            print("[TrentNodes] BiRefNet model downloaded.")
-
-        model = BEN_Base().to(device).eval()
-        model.loadcheckpoints(model_path)
-
-        _birefnet_model = model
-        _birefnet_device = device
-        _birefnet_available = True
-        print("[TrentNodes] BiRefNet model loaded successfully.")
-        return model
-
-    except Exception as e:
-        print(f"[TrentNodes] Warning: Could not load BiRefNet: {e}")
-        print("[TrentNodes] Falling back to auto-detection mode.")
-        _birefnet_available = False
-        return None
 
 
 # SD Inpainting model cache
@@ -179,13 +82,14 @@ def load_sd_inpaint_model(
 
 def clear_model_cache():
     """Clear all cached models to free memory."""
-    global _birefnet_model, _birefnet_device
     global _inpaint_model, _inpaint_model_name
 
-    _birefnet_model = None
-    _birefnet_device = None
     _inpaint_model = None
     _inpaint_model_name = None
+
+    # Also clear BiRefNet cache
+    from .birefnet_wrapper import clear_birefnet_cache
+    clear_birefnet_cache()
 
     # Force garbage collection
     import gc

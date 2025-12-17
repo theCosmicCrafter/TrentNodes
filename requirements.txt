@@ -12,3 +12,9 @@ matplotlib>=3.7.0
 
 # Optional: For ANSI color support on Windows
 colorama>=0.4.6
+
+# For lip sync / phoneme recognition
+vosk>=0.3.45
+
+# For BiRefNet background removal (Hugging Face transformers)
+transformers>=4.36.0

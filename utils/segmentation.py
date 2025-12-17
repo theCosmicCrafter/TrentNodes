@@ -2,69 +2,20 @@
 Subject segmentation and detection utilities for TrentNodes.
 
 Provides methods for detecting subjects in images:
-- BiRefNet (BEN2) AI-based segmentation (highest quality)
+- BiRefNet AI-based segmentation (highest quality)
 - Auto-detection using edges, center-weighting, and change detection
 """
 
-import numpy as np
 import torch
 import torch.nn.functional as F
 
 from .image_ops import extract_edges
 from .mask_ops import dilate_mask, erode_mask
-from .model_cache import load_birefnet, is_birefnet_available
-
-
-def birefnet_segment(
-    image: torch.Tensor,
-    device: torch.device
-) -> torch.Tensor:
-    """
-    Use BiRefNet (BEN2) for high-quality subject segmentation.
-
-    Args:
-        image: (B, H, W, C) tensor in [0, 1] range
-        device: torch device
-
-    Returns:
-        mask: (B, H, W) tensor, 1 = subject, 0 = background
-        Returns None if BiRefNet is not available
-    """
-    from PIL import Image
-    import torchvision.transforms.functional as TF
-
-    model = load_birefnet(device)
-    if model is None:
-        return None
-
-    B, H, W, C = image.shape
-    masks = []
-
-    for i in range(B):
-        # Convert tensor to PIL Image
-        img_np = (image[i].cpu().numpy() * 255).astype(np.uint8)
-        pil_img = Image.fromarray(img_np)
-
-        # Get mask from BiRefNet
-        with torch.no_grad():
-            mask_pil, _ = model.inference(pil_img, refine_foreground=False)
-
-        # Convert mask to tensor
-        mask_tensor = TF.to_tensor(mask_pil)[0]
-        mask_tensor = mask_tensor.to(device)
-
-        # Resize to match input size if needed
-        if mask_tensor.shape[0] != H or mask_tensor.shape[1] != W:
-            mask_tensor = F.interpolate(
-                mask_tensor.unsqueeze(0).unsqueeze(0),
-                size=(H, W),
-                mode='bilinear',
-                align_corners=False
-            ).squeeze(0).squeeze(0)
-
-        masks.append(mask_tensor)
-
-    return torch.stack(masks)
+from .birefnet_wrapper import (
+    birefnet_segment,
+    is_birefnet_available,
+    clear_birefnet_cache,
+)
 
 
 def auto_detect_subject(
