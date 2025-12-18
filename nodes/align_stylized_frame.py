@@ -28,7 +28,7 @@ from ..utils.mask_ops import (
     dilate_mask, erode_mask, feather_mask,
     get_mask_bbox, get_mask_centroid, get_mask_area
 )
-from ..utils.model_cache import is_birefnet_available
+from ..utils.birefnet_wrapper import is_birefnet_available
 from ..utils.segmentation import birefnet_segment, auto_detect_subject
 from ..utils.inpainting import sd_inpaint, clone_stamp_inpaint, blur_inpaint
 
