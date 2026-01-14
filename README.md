@@ -102,6 +102,17 @@ Dynamic keyframe sequencing for Wan Vace video generation. Features interactive 
 **Auto Style Dataset**
 Generates 35 prompt strings for synthetic dataset creation. Reads prompts from an external config file and applies optional prepend/append text to each output. Perfect for batch generation of training data with consistent formatting.
 
+### 🧪 TrentNodes/Testing (1 node)
+
+**LoRA Test Prompt Generator**
+Generates 10 test prompts specifically designed to validate different types of LoRA models. Supports four LoRA categories:
+- **subject_person**: Portrait/character LoRAs with varied lighting, poses, and environments
+- **style**: Artistic style LoRAs across diverse subjects and scenes
+- **product**: Object/product LoRAs with studio and lifestyle contexts
+- **vehicle**: Car/vehicle LoRAs covering angles, lighting, and motion
+
+Outputs 10 individual prompt strings plus a combined `all_prompts` output for easy batch processing. Includes optional quality suffix to append tags like "8k, detailed" to all prompts.
+
 ### 👁️ Trent/VLM (2 nodes)
 
 **VidScribe MiniCPM Beta**
@@ -183,7 +194,7 @@ Standalone background removal using BiRefNet or color keying. Returns mouth shap
 
 ## Features
 
-✅ **32 professional nodes** for video, image, VLM, and lip sync workflows  
+✅ **33 professional nodes** for video, image, VLM, testing, and lip sync workflows  
 ✅ **Organized categories** - all nodes under `Trent/` namespace  
 ✅ **Auto-discovery** - drop nodes in `nodes/` folder and restart  
 ✅ **Colorful startup banner** with load validation  
