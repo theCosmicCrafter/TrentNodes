@@ -23,14 +23,22 @@ import torch.nn.functional as F
 
 import comfy.model_management as mm
 
-from ..utils.image_ops import extract_edges, apply_affine_transform
+from ..utils.image_ops import (
+    extract_edges, apply_affine_transform, apply_affine_transform_with_mask
+)
 from ..utils.mask_ops import (
     dilate_mask, erode_mask, feather_mask,
     get_mask_bbox, get_mask_centroid, get_mask_area
 )
 from ..utils.birefnet_wrapper import is_birefnet_available
 from ..utils.segmentation import birefnet_segment, auto_detect_subject
-from ..utils.inpainting import sd_inpaint, clone_stamp_inpaint, blur_inpaint
+from ..utils.inpainting import (
+    sd_inpaint, clone_stamp_inpaint, blur_inpaint, inpaint_transform_edges
+)
+from ..utils.pose_alignment import (
+    detect_shoulders_in_masked_region, compute_shoulder_affine_transform,
+    rotate_image, rotate_mask
+)
 
 
 class AlignStylizedFrame:
@@ -84,19 +92,22 @@ class AlignStylizedFrame:
                 "subject_mask": ("MASK", {
                     "tooltip": "Optional mask for subject (for mask mode)"
                 }),
-                "subject_scale_correction": ("FLOAT", {
+                "conform_to_original": ("FLOAT", {
                     "default": 1.0,
                     "min": 0.0,
                     "max": 1.0,
                     "step": 0.1,
-                    "tooltip": "Blend for subject scale (0=stylized, 1=original)"
+                    "tooltip": (
+                        "Conform stylized to original "
+                        "(0=keep stylized, 1=match original)"
+                    )
                 }),
-                "subject_position_correction": ("FLOAT", {
-                    "default": 1.0,
-                    "min": 0.0,
-                    "max": 1.0,
-                    "step": 0.1,
-                    "tooltip": "Blend for subject position (0=stylized, 1=original)"
+                "fill_transform_edges": ("BOOLEAN", {
+                    "default": True,
+                    "tooltip": (
+                        "Inpaint edges when scaling/repositioning "
+                        "creates gaps"
+                    )
                 }),
                 "inpaint_method": (["sd_inpaint", "clone_stamp", "blur"], {
                     "default": "sd_inpaint",
@@ -328,10 +339,66 @@ class AlignStylizedFrame:
 
         return best_dy, best_dx
 
+    def _get_shoulder_alignment(self, original_image, stylized_image, orig_mask,
+                                  styl_mask, device):
+        """
+        Detect shoulders and compute alignment transform.
+
+        Uses DW Pose to detect shoulder positions in both images within their
+        respective subject mask regions, then computes the affine transform
+        needed to align stylized shoulders to original shoulders.
+
+        Args:
+            original_image: (B, H, W, C) original image tensor
+            stylized_image: (B, H, W, C) stylized image tensor
+            orig_mask: (B, H, W) original subject mask
+            styl_mask: (B, H, W) stylized subject mask
+            device: torch device
+
+        Returns:
+            dict with 'scale', 'rotation', 'affine' or None if no body detected
+        """
+        # Detect shoulders in original image (within subject region)
+        orig_shoulders = detect_shoulders_in_masked_region(
+            original_image, orig_mask
+        )
+
+        if orig_shoulders is None:
+            return None
+
+        # Detect shoulders in stylized image (within subject region)
+        styl_shoulders = detect_shoulders_in_masked_region(
+            stylized_image, styl_mask
+        )
+
+        if styl_shoulders is None:
+            return None
+
+        # Compute affine transform: stylized shoulders -> original shoulders
+        affine, scale, rotation = compute_shoulder_affine_transform(
+            styl_shoulders, orig_shoulders
+        )
+
+        if affine is None:
+            return None
+
+        print(
+            f"[AlignStylizedFrame] Shoulder alignment: scale={scale:.3f}, "
+            f"rotation={rotation:.1f}deg"
+        )
+
+        return {
+            'scale': scale,
+            'rotation': rotation,
+            'affine': affine,
+            'orig_shoulders': orig_shoulders,
+            'styl_shoulders': styl_shoulders
+        }
+
     def preserve_subject_inpaint_background(self, stylized_before_transform, aligned_bg,
                                              original_image, orig_mask, styl_mask,
                                              aligned_styl_mask,
-                                             scale_correction, position_correction,
+                                             conform_to_original,
                                              inpaint_method, mask_expand,
                                              inpaint_steps, inpaint_denoise, device):
         """
@@ -344,14 +411,13 @@ class AlignStylizedFrame:
         4. Inpaint the ALIGNED background where the ghost would appear
 
         Args:
-            stylized_before_transform: Original stylized image BEFORE any alignment
+            stylized_before_transform: Original stylized image BEFORE alignment
             aligned_bg: Background-aligned stylized image (for background pixels)
             original_image: The original image (for reference)
             orig_mask: Subject mask from ORIGINAL image (target position)
             styl_mask: Subject mask from STYLIZED image (extraction position)
-            aligned_styl_mask: Subject mask from ALIGNED stylized (inpaint position - where ghost is!)
-            scale_correction: 0-1, how much to scale subject to match original
-            position_correction: 0-1, how much to match original subject position
+            aligned_styl_mask: Subject mask from ALIGNED stylized (ghost position)
+            conform_to_original: 0-1, how much to match original position/scale
             inpaint_method: "sd_inpaint", "clone_stamp", or "blur"
             mask_expand: pixels to expand mask before inpainting
             inpaint_steps: diffusion steps for SD inpainting
@@ -377,66 +443,114 @@ class AlignStylizedFrame:
         if styl_h <= 0 or styl_w <= 0 or orig_h <= 0 or orig_w <= 0:
             return aligned_bg, "Subject detection failed"
 
-        # Use CENTROID for more accurate positioning (center of mass)
+        # Use CENTROID for positioning (center of mass) - needed as fallback
         orig_cy, orig_cx = get_mask_centroid(orig_mask)
         styl_cy, styl_cx = get_mask_centroid(styl_mask)
 
-        # Use AREA-BASED scaling for more accurate size matching
-        # (sqrt because area scales quadratically with linear dimensions)
-        orig_area = get_mask_area(orig_mask)
-        styl_area = get_mask_area(styl_mask)
-
-        if styl_area > 0:
-            area_scale = (orig_area / styl_area) ** 0.5
-        else:
-            area_scale = 1.0
-
-        # Also compute bbox-based scale for comparison
-        bbox_scale_h = orig_h / styl_h
-        bbox_scale_w = orig_w / styl_w
-        bbox_scale = (bbox_scale_h + bbox_scale_w) / 2
-
-        # Use area-based scaling (more robust to shape differences)
-        ideal_scale = area_scale
-        scale_ratio = 1.0 + (ideal_scale - 1.0) * scale_correction
-
-        # Debug output
-        print(
-            f"[AlignStylizedFrame] Scaling: area={area_scale:.3f}, "
-            f"bbox={bbox_scale:.3f}, final={scale_ratio:.3f}"
+        # Try shoulder-based alignment first (using DW Pose)
+        shoulder_alignment = self._get_shoulder_alignment(
+            original_image, stylized_before_transform,
+            orig_mask, styl_mask, device
         )
-        print(
-            f"[AlignStylizedFrame] Centroids: "
-            f"orig=({orig_cy:.1f}, {orig_cx:.1f}), "
-            f"styl=({styl_cy:.1f}, {styl_cx:.1f})"
-        )
-
-        # Position offset using centroids
-        dy = (orig_cy - styl_cy) * position_correction
-        dx = (orig_cx - styl_cx) * position_correction
 
         info_parts = []
+        use_shoulder_alignment = False
 
-        # STEP 1: Extract subject from ORIGINAL stylized (before any transforms!)
-        # Add padding around subject for clean extraction
-        pad = 20
-        extract_y_min = max(0, styl_bbox[0] - pad)
-        extract_y_max = min(H, styl_bbox[1] + pad)
-        extract_x_min = max(0, styl_bbox[2] - pad)
-        extract_x_max = min(W, styl_bbox[3] + pad)
+        if shoulder_alignment is not None and conform_to_original > 0:
+            # Shoulder alignment found - use scale from shoulder distance
+            use_shoulder_alignment = True
+            shoulder_scale = shoulder_alignment['scale']
+            shoulder_rotation = shoulder_alignment['rotation']
 
-        subject_crop = stylized_before_transform[
-            :, extract_y_min:extract_y_max, extract_x_min:extract_x_max, :
-        ]
-        mask_crop = styl_mask[
-            :, extract_y_min:extract_y_max, extract_x_min:extract_x_max
-        ]
+            # Blend with conform_to_original
+            # At 0: no transform; at 1: full shoulder alignment
+            scale_ratio = 1.0 + (shoulder_scale - 1.0) * conform_to_original
+            rotation_deg = shoulder_rotation * conform_to_original
 
-        crop_h = extract_y_max - extract_y_min
-        crop_w = extract_x_max - extract_x_min
+            print(
+                f"[AlignStylizedFrame] Shoulder-based alignment: "
+                f"scale={scale_ratio:.3f}, rotation={rotation_deg:.1f}deg"
+            )
+            info_parts.append(
+                f"Shoulder-aligned (scale={scale_ratio:.2f}, rot={rotation_deg:.1f}deg)"
+            )
 
-        # STEP 2: Scale subject if needed
-        if abs(scale_ratio - 1.0) > 0.01:
+        else:
+            # Fallback to centroid-based alignment
+            # Use AREA-BASED scaling for more accurate size matching
+            orig_area = get_mask_area(orig_mask)
+            styl_area = get_mask_area(styl_mask)
+
+            if styl_area > 0:
+                area_scale = (orig_area / styl_area) ** 0.5
+            else:
+                area_scale = 1.0
+
+            # Also compute bbox-based scale for comparison
+            bbox_scale_h = orig_h / styl_h
+            bbox_scale_w = orig_w / styl_w
+            bbox_scale = (bbox_scale_h + bbox_scale_w) / 2
+
+            # Use area-based scaling (more robust to shape differences)
+            ideal_scale = area_scale
+            scale_ratio = 1.0 + (ideal_scale - 1.0) * conform_to_original
+
+            # Debug output
+            print(
+                f"[AlignStylizedFrame] Centroid alignment (no face detected): "
+                f"scale={scale_ratio:.3f}"
+            )
+            print(
+                f"[AlignStylizedFrame] Centroids: "
+                f"orig=({orig_cy:.1f}, {orig_cx:.1f}), "
+                f"styl=({styl_cy:.1f}, {styl_cx:.1f})"
+            )
+
+            # Position offset using centroids (controlled by conform_to_original)
+            dy = (orig_cy - styl_cy) * conform_to_original
+            dx = (orig_cx - styl_cx) * conform_to_original
+
+            info_parts.append("Centroid-aligned (no pose)")
+
+        # STEP 1-3: Transform subject based on alignment method
+        if use_shoulder_alignment:
+            # SHOULDER-BASED: Crop subject first, then scale and position
+            # Key: align stylized shoulders to original shoulders
+
+            # Get shoulder positions
+            styl_shoulders = shoulder_alignment['styl_shoulders']
+            orig_shoulders = shoulder_alignment['orig_shoulders']
+
+            # Stylized shoulder center (in full image coords)
+            styl_shoulder_center_y = (styl_shoulders[0][1] + styl_shoulders[1][1]) / 2
+            styl_shoulder_center_x = (styl_shoulders[0][0] + styl_shoulders[1][0]) / 2
+
+            # Original shoulder center (target position)
+            orig_shoulder_center_y = (orig_shoulders[0][1] + orig_shoulders[1][1]) / 2
+            orig_shoulder_center_x = (orig_shoulders[0][0] + orig_shoulders[1][0]) / 2
+
+            # 1. Extract subject from ORIGINAL stylized
+            pad = 30
+            extract_y_min = max(0, styl_bbox[0] - pad)
+            extract_y_max = min(H, styl_bbox[1] + pad)
+            extract_x_min = max(0, styl_bbox[2] - pad)
+            extract_x_max = min(W, styl_bbox[3] + pad)
+
+            subject_crop = stylized_before_transform[
+                :, extract_y_min:extract_y_max, extract_x_min:extract_x_max, :
+            ]
+            mask_crop = styl_mask[
+                :, extract_y_min:extract_y_max, extract_x_min:extract_x_max
+            ]
+
+            crop_h = extract_y_max - extract_y_min
+            crop_w = extract_x_max - extract_x_min
+
+            # 2. Calculate shoulder position WITHIN the crop (before scaling)
+            shoulder_in_crop_y = styl_shoulder_center_y - extract_y_min
+            shoulder_in_crop_x = styl_shoulder_center_x - extract_x_min
+
+            # 3. Scale the crop
             new_h = max(1, int(crop_h * scale_ratio))
             new_w = max(1, int(crop_w * scale_ratio))
 
@@ -454,29 +568,119 @@ class AlignStylizedFrame:
                 align_corners=False
             ).squeeze(1)
 
-            info_parts.append(f"Scale: {scale_ratio:.3f}")
+            # 4. Shoulder position in scaled crop
+            scaled_shoulder_in_crop_y = shoulder_in_crop_y * scale_ratio
+            scaled_shoulder_in_crop_x = shoulder_in_crop_x * scale_ratio
+
+            # 5. Apply rotation if significant (> 1 degree)
+            if abs(rotation_deg) > 1.0:
+                subject_scaled = rotate_image(subject_scaled, rotation_deg, device)
+                mask_scaled = rotate_mask(mask_scaled, rotation_deg, device)
+
+                # Update shoulder position after rotation
+                # Rotation is around center of scaled crop
+                center_y = new_h / 2
+                center_x = new_w / 2
+
+                # Vector from center to shoulder
+                offset_y = scaled_shoulder_in_crop_y - center_y
+                offset_x = scaled_shoulder_in_crop_x - center_x
+
+                # Rotate this vector (same direction as image rotation)
+                angle_rad = np.radians(rotation_deg)
+                cos_r = np.cos(angle_rad)
+                sin_r = np.sin(angle_rad)
+
+                rotated_offset_x = offset_x * cos_r - offset_y * sin_r
+                rotated_offset_y = offset_x * sin_r + offset_y * cos_r
+
+                # Update shoulder position after rotation
+                scaled_shoulder_in_crop_y = center_y + rotated_offset_y
+                scaled_shoulder_in_crop_x = center_x + rotated_offset_x
+
+                print(
+                    f"[AlignStylizedFrame] Rotation {rotation_deg:.1f}° applied, "
+                    f"shoulder moved to ({scaled_shoulder_in_crop_x:.0f},"
+                    f"{scaled_shoulder_in_crop_y:.0f}) in crop"
+                )
+
+            # 6. Position so scaled shoulder aligns with original shoulder
+            # paste_origin + scaled_shoulder_in_crop = orig_shoulder_center
+            paste_y_min = int(orig_shoulder_center_y - scaled_shoulder_in_crop_y)
+            paste_x_min = int(orig_shoulder_center_x - scaled_shoulder_in_crop_x)
+            paste_y_max = paste_y_min + new_h
+            paste_x_max = paste_x_min + new_w
+
+            print(
+                f"[AlignStylizedFrame] Shoulder positioning: "
+                f"scale={scale_ratio:.3f}, crop={crop_w}x{crop_h} -> {new_w}x{new_h}"
+            )
+            print(
+                f"[AlignStylizedFrame] Shoulders: "
+                f"styl=({styl_shoulder_center_x:.0f},{styl_shoulder_center_y:.0f}) -> "
+                f"orig=({orig_shoulder_center_x:.0f},{orig_shoulder_center_y:.0f})"
+            )
+            print(
+                f"[AlignStylizedFrame] Paste region: "
+                f"y=[{paste_y_min}:{paste_y_max}], x=[{paste_x_min}:{paste_x_max}]"
+            )
+
         else:
-            subject_scaled = subject_crop
-            mask_scaled = mask_crop
-            new_h, new_w = crop_h, crop_w
+            # CENTROID-BASED: Use crop-scale-paste approach
+            # Extract subject from ORIGINAL stylized (before any transforms!)
+            pad = 20
+            extract_y_min = max(0, styl_bbox[0] - pad)
+            extract_y_max = min(H, styl_bbox[1] + pad)
+            extract_x_min = max(0, styl_bbox[2] - pad)
+            extract_x_max = min(W, styl_bbox[3] + pad)
 
-        # STEP 3: Calculate where to place the subject
-        # Use centroids for precise positioning
-        # Target center: blend between stylized centroid and original centroid
-        target_cy = styl_cy + dy  # dy = (orig_cy - styl_cy) * position_correction
-        target_cx = styl_cx + dx  # dx = (orig_cx - styl_cx) * position_correction
+            subject_crop = stylized_before_transform[
+                :, extract_y_min:extract_y_max, extract_x_min:extract_x_max, :
+            ]
+            mask_crop = styl_mask[
+                :, extract_y_min:extract_y_max, extract_x_min:extract_x_max
+            ]
 
-        # When position_correction=1.0, target = orig centroid
-        # When position_correction=0.0, target = styl centroid (no movement)
+            crop_h = extract_y_max - extract_y_min
+            crop_w = extract_x_max - extract_x_min
 
-        # Paste coordinates (center the scaled subject at target position)
-        paste_y_min = int(target_cy - new_h / 2)
-        paste_x_min = int(target_cx - new_w / 2)
-        paste_y_max = paste_y_min + new_h
-        paste_x_max = paste_x_min + new_w
+            # Scale subject if needed
+            if abs(scale_ratio - 1.0) > 0.01:
+                new_h = max(1, int(crop_h * scale_ratio))
+                new_w = max(1, int(crop_w * scale_ratio))
 
-        if abs(dy) > 1 or abs(dx) > 1:
-            info_parts.append(f"Move: ({int(dx):+d}, {int(dy):+d})px")
+                subject_scaled = F.interpolate(
+                    subject_crop.permute(0, 3, 1, 2),
+                    size=(new_h, new_w),
+                    mode='bilinear',
+                    align_corners=False
+                ).permute(0, 2, 3, 1)
+
+                mask_scaled = F.interpolate(
+                    mask_crop.unsqueeze(1),
+                    size=(new_h, new_w),
+                    mode='bilinear',
+                    align_corners=False
+                ).squeeze(1)
+
+                info_parts.append(f"Scale: {scale_ratio:.3f}")
+            else:
+                subject_scaled = subject_crop
+                mask_scaled = mask_crop
+                new_h, new_w = crop_h, crop_w
+
+            # Calculate where to place the subject
+            target_cy = styl_cy + dy
+            target_cx = styl_cx + dx
+
+            # Paste coordinates (center the scaled subject at target position)
+            paste_y_min = int(target_cy - new_h / 2)
+            paste_x_min = int(target_cx - new_w / 2)
+            paste_y_max = paste_y_min + new_h
+            paste_x_max = paste_x_min + new_w
+
+            if abs(dy) > 1 or abs(dx) > 1:
+                info_parts.append(f"Move: ({int(dx):+d}, {int(dy):+d})px")
 
         # STEP 4: Create inpainted background
         # Start with the aligned background
@@ -643,8 +847,8 @@ class AlignStylizedFrame:
     def align_frames(self, original_image, stylized_image, scale_range=0.05,
                      translation_range=32, search_precision="balanced",
                      visualization_mode="overlay", subject_mode="disabled",
-                     subject_mask=None, subject_scale_correction=1.0,
-                     subject_position_correction=1.0, inpaint_method="sd_inpaint",
+                     subject_mask=None, conform_to_original=1.0,
+                     fill_transform_edges=True, inpaint_method="sd_inpaint",
                      mask_expand=10, inpaint_steps=20, inpaint_denoise=0.9):
         """
         Main alignment function with subject-preserving mode.
@@ -653,6 +857,10 @@ class AlignStylizedFrame:
         - Subject is preserved EXACTLY (no warping/scaling)
         - Subject is repositioned to match original
         - Background is warped to fill gaps around the subject
+
+        Args:
+            conform_to_original: 0-1 slider to match original position/scale
+            fill_transform_edges: Inpaint edges when scaling creates gaps
         """
 
         device = mm.get_torch_device()
@@ -722,8 +930,8 @@ class AlignStylizedFrame:
             search_precision, device, bg_mask
         )
 
-        # Apply global alignment
-        aligned_image = apply_affine_transform(
+        # Apply global alignment with validity mask for edge detection
+        aligned_image, validity_mask = apply_affine_transform_with_mask(
             stylized_image,
             best_params['scale'],
             best_params['tx'],
@@ -731,10 +939,27 @@ class AlignStylizedFrame:
             device
         )
 
+        # PHASE 1.5: Fill transform edges if enabled and needed
+        edge_info = ""
+        if fill_transform_edges:
+            aligned_image = inpaint_transform_edges(
+                aligned_image,
+                validity_mask,
+                device,
+                method=inpaint_method,
+                steps=inpaint_steps,
+                denoise=inpaint_denoise
+            )
+            # Ensure image is back on device (SD inpaint returns CPU)
+            aligned_image = aligned_image.to(device)
+            # Check if edges were actually filled
+            edge_pixel_count = (validity_mask < 0.99).float().sum().item()
+            if edge_pixel_count > 10:
+                edge_info = "Edge fill: enabled\n"
+
         # PHASE 2: Subject-preserving correction (if enabled)
         needs_correction = (
-            orig_mask is not None and
-            (subject_scale_correction > 0 or subject_position_correction > 0)
+            orig_mask is not None and conform_to_original > 0
         )
         if needs_correction:
             # Detect where subject is in ALIGNED image for inpainting
@@ -749,16 +974,15 @@ class AlignStylizedFrame:
             # Use the CORRECT approach with THREE masks:
             # - orig_mask: target position (where subject should end up)
             # - styl_mask: extraction position (where subject is in stylized_before)
-            # - aligned_styl_mask: inpaint position (where ghost would appear in aligned_image)
+            # - aligned_styl_mask: inpaint position (where ghost would appear)
             aligned_image, correction_info = self.preserve_subject_inpaint_background(
                 stylized_before,      # Original stylized BEFORE any transforms
                 aligned_image,        # Background-aligned image
                 original_image,
                 orig_mask,            # Target: where subject should go
                 styl_mask,            # For extraction from stylized_before
-                aligned_styl_mask,    # For inpainting (where ghost is in aligned_image)
-                subject_scale_correction,
-                subject_position_correction,
+                aligned_styl_mask,    # For inpainting (where ghost is)
+                conform_to_original,  # Single parameter for both scale+position
                 inpaint_method,
                 mask_expand,
                 inpaint_steps,
@@ -782,7 +1006,7 @@ class AlignStylizedFrame:
             f"Background translation: "
             f"({best_params['tx']:.1f}, {best_params['ty']:.1f}) px\n"
             f"Alignment score: {best_score:.6f}\n"
-            f"{subject_info}"
+            f"{edge_info}{subject_info}"
         )
 
         # Prepare mask output (return orig_mask for user reference)

@@ -303,3 +303,80 @@ def inpaint(
         return blur_inpaint(image, mask, device, **kwargs)
     else:
         raise ValueError(f"Unknown inpainting method: {method}")
+
+
+def inpaint_transform_edges(
+    image: torch.Tensor,
+    validity_mask: torch.Tensor,
+    device: torch.device,
+    method: str = "sd_inpaint",
+    steps: int = 20,
+    denoise: float = 0.9,
+    edge_threshold: float = 0.99,
+    dilate_radius: int = 4
+) -> torch.Tensor:
+    """
+    Inpaint edge regions created by affine transforms.
+
+    When an image is scaled down or translated, the edges contain
+    border-replicated pixels (ugly stretched edges). This function
+    detects those regions via the validity mask and inpaints them.
+
+    Args:
+        image: (B, H, W, C) transformed image tensor
+        validity_mask: (B, H, W) mask from apply_affine_transform_with_mask
+                       where 1.0 = real pixels, <1.0 = border-replicated
+        device: torch device
+        method: Inpainting method ("sd_inpaint", "clone_stamp", "blur")
+        steps: SD inpaint diffusion steps
+        denoise: SD inpaint denoise strength
+        edge_threshold: Pixels with validity < threshold need inpainting
+        dilate_radius: Pixels to expand edge mask for better blending
+
+    Returns:
+        Image with edges inpainted
+    """
+    # Create edge mask (where validity < threshold = border-replicated)
+    edge_mask = (validity_mask < edge_threshold).float()
+
+    # Skip if no edges need inpainting (e.g., scale > 1.0 case)
+    edge_pixel_count = edge_mask.sum().item()
+    if edge_pixel_count < 10:
+        return image
+
+    B, H, W, C = image.shape
+    edge_width = int((edge_pixel_count / B) ** 0.5 / 4)  # Rough estimate
+    print(
+        f"[TrentNodes] Edge inpainting: ~{int(edge_pixel_count/B)} pixels "
+        f"(~{edge_width}px border)"
+    )
+
+    # Expand edge mask slightly for better blending
+    if dilate_radius > 0:
+        edge_mask = dilate_mask(edge_mask, radius=dilate_radius, device=device)
+        if edge_mask.dim() == 2:
+            edge_mask = edge_mask.unsqueeze(0)
+
+    # Use the unified inpaint interface
+    if method == "sd_inpaint":
+        result = inpaint(
+            image, edge_mask, device,
+            method="sd_inpaint",
+            steps=steps,
+            denoise=denoise
+        )
+    elif method == "clone_stamp":
+        result = inpaint(
+            image, edge_mask, device,
+            method="clone_stamp",
+            iterations=25,
+            sample_radius=12
+        )
+    else:
+        result = inpaint(
+            image, edge_mask, device,
+            method="blur",
+            iterations=5
+        )
+
+    return result
