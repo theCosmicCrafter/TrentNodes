@@ -27,28 +27,33 @@ pip install -r requirements.txt
 
 All nodes are organized under the `Trent/` category for easy navigation.
 
-### 📹 Trent/Video (7 nodes)
+### 📹 Trent/Video (6 nodes)
 
 **Chop Cuts**
 Accurate scene detection and video splitting. Automatically detects cuts, fades, and transitions using multi-metric analysis, then exports each scene as a separate MP4 file with a detailed report of cut locations and timestamps.
 
-**Video Folder Analyzer**  
+**Video Folder Analyzer**
 Scans directories for video files and generates detailed reports including resolution, frame rate, codec, duration, and file size. Outputs as text, JSON, or markdown.
 
-**Latest Video Last N Frames**  
+**Latest Video Last N Frames**
 Extracts the final N frames from the most recently modified video in a specified directory. Useful for monitoring render outputs.
 
-**Latest Video Final Frame**  
+**Latest Video Final Frame**
 Retrieves the last frame from the newest video file in a folder. Streamlines iterative video generation workflows.
 
-**Cross Dissolve with Overlap**  
+**Cross Dissolve with Overlap**
 Creates smooth frame transitions with configurable overlap duration. Blends adjacent frames for professional video effects.
-
-**Enhanced Animation Timing Processor**  
-Analyzes animation sequences to detect duplicate frames, timing patterns, and frame holds. Optimizes animation frame sequences.
 
 **Batch Slowdown**
 GPU-accelerated frame duplication to slow down image, mask, or latent batches. Supports multiple input modes: direct multiplier (2x, 3x, 1.5x), target frame count, or FPS conversion (24fps to 60fps). Features smart decimal distribution for non-integer slowdowns and optional speedup mode for sampling every Nth frame.
+
+### 🎞️ Animation/Timing (2 nodes)
+
+**Animation Duplicate Frame Processor**
+Analyzes animation sequences to detect duplicate frames and timing patterns. Identifies frame holds and optimizes animation timing for smoother playback.
+
+**Animation Frame Remover**
+Removes duplicate or unwanted frames from animation sequences based on configurable thresholds. Cleans up animation batches for efficient processing.
 
 ### 🖼️ Trent/Image (4 nodes)
 
@@ -64,33 +69,51 @@ Applies depth and dimensionality to images through configurable bevel and emboss
 **Image Batch Analyzer**
 Comprehensive statistical analysis of image batches. Generates histograms, color distribution charts, and detailed reports on brightness, contrast, and color composition.
 
-### 🔧 Trent/Utilities (7 nodes)
+### 🔧 Trent/Utilities (10 nodes)
 
-**Smart File Transfer (Auto-Rename)**  
+**Smart File Transfer (Auto-Rename)**
 Intelligent file management with automatic conflict resolution, checksums, and organized directory structures. Safely transfers files with duplicate detection.
 
-**Custom Filename Generator**  
+**Custom Filename Generator**
 Creates structured filenames using templates with support for timestamps, counters, and metadata variables. Ensures consistent file naming across workflows.
 
-**Filename Extractor**  
+**Filename Extractor**
 Parses filenames to extract embedded metadata, timestamps, and structured information. Converts filenames into usable workflow data.
 
-**JSON → Multi-Line Summary**  
+**JSON Multi-Line Summary**
 Converts complex JSON data into human-readable multi-line summaries. Formats nested structures for display and logging.
 
-**JSON Extractor**  
+**JSON Extractor**
 Extracts specific values from JSON objects using path notation. Simplifies working with structured data in workflows.
 
-**Number Counter**  
+**Number Counter**
 Generates sequential numbers with configurable start, step, and padding. Essential for batch processing and frame numbering.
+
+**Text File Line Loader**
+Loads individual lines from text files by index. Useful for iterating through prompt lists or configuration files.
+
+**File List**
+Lists files in a directory with filtering options. Returns file paths for batch processing workflows.
+
+**File Collision Test**
+Tests for filename conflicts before file operations. Helps prevent accidental overwrites in batch workflows.
 
 **Wan2.1 Frame Adjuster**
 Adjusts frame amount to always satisfy Wan 4x+1 requirements by adding gray frames to the end of a batch; use a Get Frame Range from Batch node before combining video with the original amount of frames for less headaches when using Wan.
 
-### 🎭 Trent/Masks (1 node)
+### 🎭 Trent/Masks (4 nodes)
 
-**Latent Aligned Mask**  
+**Latent Aligned Mask**
 Creates precision masks aligned to latent space dimensions. Ensures proper mask scaling for latent-based video and image processing.
+
+**Latent Aligned Mask (Advanced)**
+Extended version with additional parameters for fine-tuned mask generation including feathering, inversion, and composite operations.
+
+**Latent Aligned Mask (Simple)**
+Streamlined mask creation with minimal inputs for quick latent-aligned masks in simple workflows.
+
+**Latent Aligned Mask (Wan)**
+Specialized variant optimized for Wan video model requirements with automatic 4x+1 frame alignment.
 
 ### 🎬 Trent/Keyframes (1 node)
 
@@ -127,7 +150,7 @@ GPU-accelerated vision-language model for describing images and video frames usi
 **Unload MiniCPM**
 Manually unload MiniCPM model to immediately free VRAM. Connect any output to trigger. Useful when you need GPU memory for other operations without waiting for the 60-second auto-unload timeout.
 
-### 🎤 Trent/LipSync (9 nodes)
+### 🎤 Trent/LipSync (11 nodes)
 
 Complete lip sync pipeline for non-human character animation. Converts audio to mouth shapes and composites them onto tracked positions in video frames.
 
@@ -152,6 +175,9 @@ Advanced compositor with tracking support. Places mouth shapes at positions dete
 - **Mask tracking**: Use per-frame masks from SAM3 to find mouth centroids
 
 Features BiRefNet background removal, scaling, offset adjustment, and optional RGBA output for further compositing.
+
+**Creature Lip Sync**
+All-in-one lip sync node combining audio analysis, mouth shape selection, and compositing in a single streamlined node. Ideal for quick character animation setups.
 
 **Point Tracker**
 Robust point tracking using pyramidal Lucas-Kanade optical flow. Click a point on frame 1 and track it through the entire video. Features:
@@ -194,7 +220,7 @@ Standalone background removal using BiRefNet or color keying. Returns mouth shap
 
 ## Features
 
-✅ **33 professional nodes** for video, image, VLM, testing, and lip sync workflows  
+✅ **42 professional nodes** for video, image, VLM, testing, and lip sync workflows  
 ✅ **Organized categories** - all nodes under `Trent/` namespace  
 ✅ **Auto-discovery** - drop nodes in `nodes/` folder and restart  
 ✅ **Colorful startup banner** with load validation  
