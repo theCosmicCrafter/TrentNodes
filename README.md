@@ -95,8 +95,8 @@ Loads individual lines from text files by index. Useful for iterating through pr
 **File List**
 Lists files in a directory with filtering options. Returns file paths for batch processing workflows.
 
-**File Collision Test**
-Tests for filename conflicts before file operations. Helps prevent accidental overwrites in batch workflows.
+**Create Text File**
+Creates text files with custom content. Specify a file path and content to write. Automatically adds .txt extension if none provided. Creates parent directories as needed.
 
 **Wan2.1 Frame Adjuster**
 Adjusts frame amount to always satisfy Wan 4x+1 requirements by adding gray frames to the end of a batch; use a Get Frame Range from Batch node before combining video with the original amount of frames for less headaches when using Wan.

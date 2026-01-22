@@ -215,6 +215,10 @@ class FileCollisionTestNode:
         """
         try:
             file_path = Path(file_path.strip())
+
+            # Add .txt extension if none provided
+            if not file_path.suffix:
+                file_path = file_path.with_suffix('.txt')
             
             # Create parent directories if needed
             file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -300,6 +304,6 @@ NODE_CLASS_MAPPINGS = {
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "SmartFileTransferNode": "Smart File Transfer (Auto-Rename)",
-    "FileCollisionTestNode": "Create Test File",
+    "FileCollisionTestNode": "Create Text File",
     "FileListNode": "List Directory Files"
 }
