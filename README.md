@@ -55,7 +55,7 @@ Analyzes animation sequences to detect duplicate frames and timing patterns. Ide
 **Animation Frame Remover**
 Removes duplicate or unwanted frames from animation sequences based on configurable thresholds. Cleans up animation batches for efficient processing.
 
-### 🖼️ Trent/Image (5 nodes)
+### 🖼️ Trent/Image (6 nodes)
 
 **Image+Text Grid**
 Creates a grid layout of images with text captions below each. Dynamic inputs automatically expand as you connect more images - each image gets a paired caption text field. Configure grid layout with images per row, image size, caption height, font size, padding, and background color. Perfect for contact sheets, comparison grids, or captioned image galleries.
@@ -71,6 +71,9 @@ Applies depth and dimensionality to images through configurable bevel and emboss
 
 **Image Batch Analyzer**
 Comprehensive statistical analysis of image batches. Generates histograms, color distribution charts, and detailed reports on brightness, contrast, and color composition.
+
+**Multi-Batch Combine**
+Concatenates multiple image batches into a single output batch. Accepts up to 8 optional inputs - unconnected inputs are simply skipped. Handles dimension mismatches automatically with configurable resize modes: largest (resize all to max dimensions), first (match first batch), or custom (specify target width/height). GPU-accelerated resizing via bilinear, nearest, bicubic, or area interpolation.
 
 ### 🔧 Trent/Utilities (10 nodes)
 
@@ -226,7 +229,7 @@ Standalone background removal using BiRefNet or color keying. Returns mouth shap
 
 ## Features
 
-✅ **44 professional nodes** for video, image, VLM, testing, and lip sync workflows  
+✅ **45 professional nodes** for video, image, VLM, testing, and lip sync workflows  
 ✅ **Organized categories** - all nodes under `Trent/` namespace  
 ✅ **Auto-discovery** - drop nodes in `nodes/` folder and restart  
 ✅ **Colorful startup banner** with load validation  
