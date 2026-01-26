@@ -55,7 +55,10 @@ Analyzes animation sequences to detect duplicate frames and timing patterns. Ide
 **Animation Frame Remover**
 Removes duplicate or unwanted frames from animation sequences based on configurable thresholds. Cleans up animation batches for efficient processing.
 
-### 🖼️ Trent/Image (4 nodes)
+### 🖼️ Trent/Image (5 nodes)
+
+**Image+Text Grid**
+Creates a grid layout of images with text captions below each. Dynamic inputs automatically expand as you connect more images - each image gets a paired caption text field. Configure grid layout with images per row, image size, caption height, font size, padding, and background color. Perfect for contact sheets, comparison grids, or captioned image galleries.
 
 **Align Stylized Frame**
 Aligns AI-stylized images back to their original subject position with pixel-perfect precision. Uses BiRefNet (BEN2) for high-quality subject segmentation, SD 1.5 inpainting for clean plate background generation, and area-based scaling with centroid positioning for accurate subject placement. Eliminates ghosting artifacts when compositing stylized subjects onto original backgrounds.
@@ -223,7 +226,7 @@ Standalone background removal using BiRefNet or color keying. Returns mouth shap
 
 ## Features
 
-✅ **43 professional nodes** for video, image, VLM, testing, and lip sync workflows  
+✅ **44 professional nodes** for video, image, VLM, testing, and lip sync workflows  
 ✅ **Organized categories** - all nodes under `Trent/` namespace  
 ✅ **Auto-discovery** - drop nodes in `nodes/` folder and restart  
 ✅ **Colorful startup banner** with load validation  

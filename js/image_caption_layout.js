@@ -1,0 +1,236 @@
+import { app } from "/scripts/app.js";
+
+/**
+ * Image Caption Layout - Dynamic Input Extension
+ *
+ * Automatically adds new image/caption input pairs when you connect
+ * to the last available image slot. Caption widgets appear only when
+ * their corresponding image is connected.
+ */
+app.registerExtension({
+    name: "Trent.ImageTextGrid",
+
+    async nodeCreated(node) {
+        if (node.constructor.comfyClass !== "ImageTextGrid") {
+            return;
+        }
+
+        /**
+         * Get all image input indices currently on the node
+         */
+        const getImageInputIndices = () => {
+            const indices = [];
+            for (const input of node.inputs || []) {
+                const match = input.name.match(/^image_(\d+)$/);
+                if (match) {
+                    indices.push(parseInt(match[1]));
+                }
+            }
+            return indices.sort((a, b) => a - b);
+        };
+
+        /**
+         * Check if an image input at given index is connected
+         */
+        const isInputConnected = (index) => {
+            const input = node.inputs?.find(i => i.name === `image_${index}`);
+            return input && input.link !== null;
+        };
+
+        /**
+         * Find or create a caption widget for given index
+         */
+        const ensureCaptionWidget = (index) => {
+            const captionName = `caption_${index}`;
+            let widget = node.widgets?.find(w => w.name === captionName);
+
+            if (!widget) {
+                widget = node.addWidget(
+                    "text",
+                    captionName,
+                    "",
+                    () => {},
+                    {
+                        multiline: true,
+                        placeholder: `Caption for image ${index}`,
+                    }
+                );
+            }
+
+            return widget;
+        };
+
+        /**
+         * Add a new image input slot
+         */
+        const addImageInput = (index) => {
+            const inputName = `image_${index}`;
+
+            if (node.inputs?.find(i => i.name === inputName)) {
+                return false;
+            }
+
+            node.addInput(inputName, "IMAGE");
+            return true;
+        };
+
+        /**
+         * Remove an image input slot and its caption widget
+         */
+        const removeImageInput = (index) => {
+            const inputName = `image_${index}`;
+            const captionName = `caption_${index}`;
+
+            const inputIdx = node.inputs?.findIndex(i => i.name === inputName);
+            if (inputIdx >= 0) {
+                const input = node.inputs[inputIdx];
+                if (input.link !== null) {
+                    app.graph.removeLink(input.link);
+                }
+                node.removeInput(inputIdx);
+            }
+
+            const widgetIdx = node.widgets?.findIndex(w => w.name === captionName);
+            if (widgetIdx >= 0) {
+                node.widgets.splice(widgetIdx, 1);
+            }
+        };
+
+        /**
+         * Sort caption widgets so they appear in numerical order
+         */
+        const sortCaptionWidgets = () => {
+            if (!node.widgets) return;
+
+            const captionWidgets = [];
+            const otherWidgets = [];
+
+            for (const widget of node.widgets) {
+                if (widget.name.match(/^caption_\d+$/)) {
+                    captionWidgets.push(widget);
+                } else {
+                    otherWidgets.push(widget);
+                }
+            }
+
+            captionWidgets.sort((a, b) => {
+                const aNum = parseInt(a.name.match(/^caption_(\d+)$/)[1]);
+                const bNum = parseInt(b.name.match(/^caption_(\d+)$/)[1]);
+                return aNum - bNum;
+            });
+
+            node.widgets.length = 0;
+            node.widgets.push(...otherWidgets, ...captionWidgets);
+        };
+
+        /**
+         * Update widget visibility - show caption only for connected images
+         */
+        const updateWidgetVisibility = () => {
+            const indices = getImageInputIndices();
+
+            for (const idx of indices) {
+                const captionName = `caption_${idx}`;
+                const widget = node.widgets?.find(w => w.name === captionName);
+                const connected = isInputConnected(idx);
+
+                if (connected) {
+                    if (!widget) {
+                        ensureCaptionWidget(idx);
+                    }
+                } else {
+                    if (widget) {
+                        const widgetIdx = node.widgets.indexOf(widget);
+                        if (widgetIdx >= 0) {
+                            node.widgets.splice(widgetIdx, 1);
+                        }
+                    }
+                }
+            }
+
+            sortCaptionWidgets();
+        };
+
+        /**
+         * Main function to update dynamic inputs based on connection state
+         */
+        const updateDynamicInputs = () => {
+            const indices = getImageInputIndices();
+
+            if (indices.length === 0) {
+                addImageInput(1);
+                return;
+            }
+
+            const connectedIndices = indices.filter(i => isInputConnected(i));
+            const unconnectedIndices = indices.filter(i => !isInputConnected(i));
+
+            const maxIndex = Math.max(...indices);
+
+            // If the highest input is connected, add a new one
+            if (isInputConnected(maxIndex)) {
+                addImageInput(maxIndex + 1);
+            }
+
+            // Remove extra unconnected inputs (keep only one empty slot)
+            const maxConnectedIndex = connectedIndices.length > 0
+                ? Math.max(...connectedIndices)
+                : 0;
+            const sortedUnconnected = [...unconnectedIndices].sort((a, b) => b - a);
+
+            for (let i = 1; i < sortedUnconnected.length; i++) {
+                const idx = sortedUnconnected[i];
+                if (idx > maxConnectedIndex) {
+                    removeImageInput(idx);
+                }
+            }
+
+            updateWidgetVisibility();
+            node.setSize(node.computeSize());
+        };
+
+        // Hook into connection changes
+        const originalOnConnectionsChange = node.onConnectionsChange;
+        node.onConnectionsChange = function(type, slotIndex, isConnected, link, ioSlot) {
+            if (originalOnConnectionsChange) {
+                originalOnConnectionsChange.apply(this, arguments);
+            }
+
+            if (type === 1) {
+                setTimeout(updateDynamicInputs, 50);
+            }
+        };
+
+        // Hook into configure for loading saved workflows
+        const originalOnConfigure = node.onConfigure;
+        node.onConfigure = function(config) {
+            if (originalOnConfigure) {
+                originalOnConfigure.apply(this, arguments);
+            }
+
+            if (config.inputs) {
+                for (const input of config.inputs) {
+                    const match = input.name.match(/^image_(\d+)$/);
+                    if (match) {
+                        const idx = parseInt(match[1]);
+                        addImageInput(idx);
+                    }
+                }
+            }
+
+            setTimeout(() => {
+                updateDynamicInputs();
+            }, 100);
+        };
+
+        // Initial setup - ensure image_1 exists and update state
+        setTimeout(() => {
+            const indices = getImageInputIndices();
+            if (indices.length === 0) {
+                addImageInput(1);
+            }
+
+            updateDynamicInputs();
+        }, 100);
+    },
+});
