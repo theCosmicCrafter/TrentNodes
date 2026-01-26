@@ -1,7 +1,8 @@
 import { app } from "/scripts/app.js";
+import { ComfyWidgets } from "/scripts/widgets.js";
 
 /**
- * Image Caption Layout - Dynamic Input Extension
+ * Image+Text Grid - Dynamic Input Extension
  *
  * Automatically adds new image/caption input pairs when you connect
  * to the last available image slot. Caption widgets appear only when
@@ -45,16 +46,15 @@ app.registerExtension({
             let widget = node.widgets?.find(w => w.name === captionName);
 
             if (!widget) {
-                widget = node.addWidget(
-                    "text",
+                // Use ComfyWidgets.STRING for proper multiline text widget
+                const result = ComfyWidgets["STRING"](
+                    node,
                     captionName,
-                    "",
-                    () => {},
-                    {
-                        multiline: true,
-                        placeholder: `Caption for image ${index}`,
-                    }
+                    ["STRING", { multiline: true }],
+                    app
                 );
+                widget = result.widget;
+                widget.value = "";
             }
 
             return widget;
