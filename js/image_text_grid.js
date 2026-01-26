@@ -1,12 +1,10 @@
 import { app } from "/scripts/app.js";
-import { ComfyWidgets } from "/scripts/widgets.js";
 
 /**
  * Image+Text Grid - Dynamic Input Extension
  *
  * Automatically adds new image/caption input pairs when you connect
- * to the last available image slot. Captions can be typed directly
- * or connected from other nodes.
+ * to the last available image slot. Captions are input-only (connectable).
  */
 app.registerExtension({
     name: "Trent.ImageTextGrid",
@@ -39,37 +37,7 @@ app.registerExtension({
         };
 
         /**
-         * Check if a caption input at given index is connected
-         */
-        const isCaptionConnected = (index) => {
-            const input = node.inputs?.find(i => i.name === `caption_${index}`);
-            return input && input.link !== null;
-        };
-
-        /**
-         * Find or create a caption widget for given index
-         */
-        const ensureCaptionWidget = (index) => {
-            const captionName = `caption_${index}`;
-            let widget = node.widgets?.find(w => w.name === captionName);
-
-            if (!widget) {
-                // Use ComfyWidgets.STRING for proper multiline text widget
-                const result = ComfyWidgets["STRING"](
-                    node,
-                    captionName,
-                    ["STRING", { multiline: true }],
-                    app
-                );
-                widget = result.widget;
-                widget.value = "";
-            }
-
-            return widget;
-        };
-
-        /**
-         * Add a new image input slot
+         * Add a new image input slot at specific index
          */
         const addImageInput = (index) => {
             const inputName = `image_${index}`;
@@ -83,7 +51,7 @@ app.registerExtension({
         };
 
         /**
-         * Add a new caption input slot
+         * Add a new caption input slot at specific index
          */
         const addCaptionInput = (index) => {
             const inputName = `caption_${index}`;
@@ -97,99 +65,84 @@ app.registerExtension({
         };
 
         /**
-         * Remove an image input slot and its caption widget/input
+         * Remove an image input and its caption input by index
          */
-        const removeImageInput = (index) => {
-            const inputName = `image_${index}`;
+        const removeInputPair = (index) => {
+            const imageName = `image_${index}`;
             const captionName = `caption_${index}`;
 
             // Remove image input
-            const inputIdx = node.inputs?.findIndex(i => i.name === inputName);
-            if (inputIdx >= 0) {
-                const input = node.inputs[inputIdx];
+            const imageIdx = node.inputs?.findIndex(i => i.name === imageName);
+            if (imageIdx >= 0) {
+                const input = node.inputs[imageIdx];
                 if (input.link !== null) {
                     app.graph.removeLink(input.link);
                 }
-                node.removeInput(inputIdx);
+                node.removeInput(imageIdx);
             }
 
             // Remove caption input
-            const captionInputIdx = node.inputs?.findIndex(
-                i => i.name === captionName
-            );
-            if (captionInputIdx >= 0) {
-                const input = node.inputs[captionInputIdx];
+            const captionIdx = node.inputs?.findIndex(i => i.name === captionName);
+            if (captionIdx >= 0) {
+                const input = node.inputs[captionIdx];
                 if (input.link !== null) {
                     app.graph.removeLink(input.link);
                 }
-                node.removeInput(captionInputIdx);
-            }
-
-            // Remove caption widget if exists
-            const widgetIdx = node.widgets?.findIndex(w => w.name === captionName);
-            if (widgetIdx >= 0) {
-                node.widgets.splice(widgetIdx, 1);
+                node.removeInput(captionIdx);
             }
         };
 
         /**
-         * Sort caption widgets so they appear in numerical order
+         * Reorder inputs so they appear as image_1, caption_1, image_2, caption_2...
          */
-        const sortCaptionWidgets = () => {
-            if (!node.widgets) return;
+        const reorderInputs = () => {
+            if (!node.inputs) return;
 
-            const captionWidgets = [];
-            const otherWidgets = [];
+            const imageInputs = [];
+            const captionInputs = [];
+            const otherInputs = [];
 
-            for (const widget of node.widgets) {
-                if (widget.name.match(/^caption_\d+$/)) {
-                    captionWidgets.push(widget);
+            for (const input of node.inputs) {
+                const imageMatch = input.name.match(/^image_(\d+)$/);
+                const captionMatch = input.name.match(/^caption_(\d+)$/);
+
+                if (imageMatch) {
+                    imageInputs.push({
+                        input,
+                        index: parseInt(imageMatch[1])
+                    });
+                } else if (captionMatch) {
+                    captionInputs.push({
+                        input,
+                        index: parseInt(captionMatch[1])
+                    });
                 } else {
-                    otherWidgets.push(widget);
+                    otherInputs.push(input);
                 }
             }
 
-            captionWidgets.sort((a, b) => {
-                const aNum = parseInt(a.name.match(/^caption_(\d+)$/)[1]);
-                const bNum = parseInt(b.name.match(/^caption_(\d+)$/)[1]);
-                return aNum - bNum;
-            });
+            // Sort by index
+            imageInputs.sort((a, b) => a.index - b.index);
+            captionInputs.sort((a, b) => a.index - b.index);
 
-            node.widgets.length = 0;
-            node.widgets.push(...otherWidgets, ...captionWidgets);
-        };
+            // Rebuild inputs array: other inputs first, then pairs
+            node.inputs.length = 0;
+            node.inputs.push(...otherInputs);
 
-        /**
-         * Update widget visibility - show caption widget only when:
-         * - Image is connected AND caption input is NOT connected
-         */
-        const updateWidgetVisibility = () => {
-            const indices = getImageInputIndices();
+            // Interleave image and caption inputs
+            const indices = [
+                ...new Set([
+                    ...imageInputs.map(i => i.index),
+                    ...captionInputs.map(i => i.index)
+                ])
+            ].sort((a, b) => a - b);
 
             for (const idx of indices) {
-                const captionName = `caption_${idx}`;
-                const widget = node.widgets?.find(w => w.name === captionName);
-                const imageConnected = isInputConnected(idx);
-                const captionConnected = isCaptionConnected(idx);
-
-                if (imageConnected && !captionConnected) {
-                    // Image connected, caption not connected - show widget
-                    if (!widget) {
-                        ensureCaptionWidget(idx);
-                    }
-                } else {
-                    // Either image not connected or caption is connected
-                    // - remove widget
-                    if (widget) {
-                        const widgetIdx = node.widgets.indexOf(widget);
-                        if (widgetIdx >= 0) {
-                            node.widgets.splice(widgetIdx, 1);
-                        }
-                    }
-                }
+                const img = imageInputs.find(i => i.index === idx);
+                const cap = captionInputs.find(i => i.index === idx);
+                if (img) node.inputs.push(img.input);
+                if (cap) node.inputs.push(cap.input);
             }
-
-            sortCaptionWidgets();
         };
 
         /**
@@ -201,18 +154,9 @@ app.registerExtension({
             if (indices.length === 0) {
                 addImageInput(1);
                 addCaptionInput(1);
+                reorderInputs();
+                node.setSize(node.computeSize());
                 return;
-            }
-
-            const connectedIndices = indices.filter(i => isInputConnected(i));
-            const unconnectedIndices = indices.filter(i => !isInputConnected(i));
-
-            const maxIndex = Math.max(...indices);
-
-            // If the highest input is connected, add a new pair
-            if (isInputConnected(maxIndex)) {
-                addImageInput(maxIndex + 1);
-                addCaptionInput(maxIndex + 1);
             }
 
             // Ensure all image inputs have corresponding caption inputs
@@ -225,7 +169,17 @@ app.registerExtension({
                 }
             }
 
-            // Remove extra unconnected inputs (keep only one empty slot)
+            const connectedIndices = indices.filter(i => isInputConnected(i));
+            const unconnectedIndices = indices.filter(i => !isInputConnected(i));
+            const maxIndex = Math.max(...indices);
+
+            // If the highest input is connected, add a new pair
+            if (isInputConnected(maxIndex)) {
+                addImageInput(maxIndex + 1);
+                addCaptionInput(maxIndex + 1);
+            }
+
+            // Remove extra unconnected pairs (keep only one empty slot)
             const maxConnectedIndex = connectedIndices.length > 0
                 ? Math.max(...connectedIndices)
                 : 0;
@@ -236,11 +190,11 @@ app.registerExtension({
             for (let i = 1; i < sortedUnconnected.length; i++) {
                 const idx = sortedUnconnected[i];
                 if (idx > maxConnectedIndex) {
-                    removeImageInput(idx);
+                    removeInputPair(idx);
                 }
             }
 
-            updateWidgetVisibility();
+            reorderInputs();
             node.setSize(node.computeSize());
         };
 
@@ -282,7 +236,7 @@ app.registerExtension({
             }, 100);
         };
 
-        // Initial setup - ensure image_1 and caption_1 exist
+        // Initial setup
         setTimeout(() => {
             const indices = getImageInputIndices();
             if (indices.length === 0) {

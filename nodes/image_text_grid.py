@@ -71,11 +71,7 @@ class ImageTextGrid:
             "optional": {
                 # JS dynamically adds image_N and caption_N pairs
                 "image_1": ("IMAGE",),
-                "caption_1": ("STRING", {
-                    "multiline": True,
-                    "default": "",
-                    "forceInput": False,
-                }),
+                "caption_1": ("STRING", {"forceInput": True}),
             },
         }
 
