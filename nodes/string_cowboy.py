@@ -1,37 +1,41 @@
 """
-StringCowboy - Prepend and/or append text to all strings in a list.
+StringListCowboy - Make a list of strings with optional prepend/append.
 
-Lassos each string in a list and brands them with prefix and suffix text.
+Lassos strings together into a list and brands them with prefix/suffix text.
+Works like Impact Pack's MakeAnyList but specialized for strings.
 """
 
-MAX_INPUTS = 20
+
+class AnyType(str):
+    """Wildcard type that matches any input type."""
+
+    def __ne__(self, __value: object) -> bool:
+        return False
 
 
-class StringCowboy:
-    """Prepend and/or append text to all strings in a list."""
+any_typ = AnyType("*")
+
+
+class StringListCowboy:
+    """Make a list of strings with optional prepend/append to each."""
 
     @classmethod
     def INPUT_TYPES(cls):
-        optional = {
-            "prefix": ("STRING", {
-                "default": "",
-                "multiline": False,
-                "placeholder": "Text to add before each string"
-            }),
-            "suffix": ("STRING", {
-                "default": "",
-                "multiline": False,
-                "placeholder": "Text to add after each string"
-            }),
-        }
-        for i in range(1, MAX_INPUTS + 1):
-            optional[f"string_{i}"] = ("STRING", {"forceInput": True})
-
         return {
-            "required": {
-                "mode": (["prepend", "append", "both"],),
+            "required": {},
+            "optional": {
+                "prefix": ("STRING", {
+                    "default": "",
+                    "multiline": False,
+                    "placeholder": "Text to add before each string"
+                }),
+                "suffix": ("STRING", {
+                    "default": "",
+                    "multiline": False,
+                    "placeholder": "Text to add after each string"
+                }),
+                "value1": (any_typ,),
             },
-            "optional": optional,
         }
 
     RETURN_TYPES = ("STRING",)
@@ -40,37 +44,28 @@ class StringCowboy:
     FUNCTION = "wrangle"
     CATEGORY = "Trent/Text"
 
-    def wrangle(self, mode, prefix="", suffix="", **kwargs):
-        # Collect all connected string inputs in order
+    def wrangle(self, prefix="", suffix="", **kwargs):
+        # Collect all connected value inputs
         strings = []
-        for i in range(1, MAX_INPUTS + 1):
-            key = f"string_{i}"
-            if key in kwargs and kwargs[key] is not None:
-                val = kwargs[key]
+        for key, val in kwargs.items():
+            if key.startswith("value") and val is not None:
                 if isinstance(val, list):
-                    strings.extend(val)
+                    strings.extend(str(v) for v in val)
                 else:
                     strings.append(str(val))
 
-        # Apply prefix/suffix based on mode
+        # Apply prefix/suffix to each string
         result = []
         for text in strings:
-            text = str(text)
-            if mode == "prepend":
-                text = prefix + text
-            elif mode == "append":
-                text = text + suffix
-            elif mode == "both":
-                text = prefix + text + suffix
-            result.append(text)
+            result.append(f"{prefix}{text}{suffix}")
 
         return (result,)
 
 
 NODE_CLASS_MAPPINGS = {
-    "StringCowboy": StringCowboy,
+    "StringListCowboy": StringListCowboy,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "StringCowboy": "String Cowboy",
+    "StringListCowboy": "String List Cowboy",
 }

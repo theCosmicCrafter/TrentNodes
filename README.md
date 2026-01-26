@@ -125,8 +125,8 @@ Dynamic keyframe sequencing for Wan Vace video generation. Features interactive 
 **Auto Style Dataset**
 Generates 35 prompt strings for synthetic dataset creation. Reads prompts from an external config file and applies optional prepend/append text to each output. Perfect for batch generation of training data with consistent formatting.
 
-**String Cowboy**
-Lassos all strings in a list and brands them with prefix and/or suffix text. Three modes: prepend (add text before each string), append (add text after), or both (wrap each string). Perfect for batch-formatting prompts, file paths, or any string list that needs consistent decoration.
+**String List Cowboy**
+Lassos strings together into a list with optional prefix/suffix branding. Works like Impact Pack's MakeAnyList but specialized for strings - connect any inputs and they get collected into a string list. Each string gets the prefix prepended and suffix appended. Dynamic inputs expand as you connect more values.
 
 ### 🧪 TrentNodes/Testing (1 node)
 
