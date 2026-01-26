@@ -2,7 +2,7 @@
 StringListCowboy - Make a list of strings with optional prepend/append.
 
 Lassos strings together into a list and brands them with prefix/suffix text.
-Works like Impact Pack's MakeAnyList but specialized for strings.
+Dynamic inputs expand as you connect more values.
 """
 
 
@@ -34,7 +34,8 @@ class StringListCowboy:
                     "multiline": False,
                     "placeholder": "Text to add after each string"
                 }),
-                "value1": (any_typ,),
+                # First dynamic input - JS will add more as needed
+                "value_1": (any_typ,),
             },
         }
 
@@ -44,15 +45,32 @@ class StringListCowboy:
     FUNCTION = "wrangle"
     CATEGORY = "Trent/Text"
 
+    @classmethod
+    def VALIDATE_INPUTS(cls, **kwargs):
+        # Accept any dynamically added inputs
+        return True
+
     def wrangle(self, prefix="", suffix="", **kwargs):
-        # Collect all connected value inputs
-        strings = []
+        # Collect all connected value inputs in order
+        value_items = []
         for key, val in kwargs.items():
-            if key.startswith("value") and val is not None:
-                if isinstance(val, list):
-                    strings.extend(str(v) for v in val)
-                else:
-                    strings.append(str(val))
+            if key.startswith("value_") and val is not None:
+                try:
+                    idx = int(key.split("_")[1])
+                    value_items.append((idx, val))
+                except (ValueError, IndexError):
+                    continue
+
+        # Sort by index to maintain order
+        value_items.sort(key=lambda x: x[0])
+
+        # Build string list
+        strings = []
+        for idx, val in value_items:
+            if isinstance(val, list):
+                strings.extend(str(v) for v in val)
+            else:
+                strings.append(str(val))
 
         # Apply prefix/suffix to each string
         result = []
