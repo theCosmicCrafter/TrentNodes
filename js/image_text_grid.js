@@ -3,8 +3,8 @@ import { app } from "/scripts/app.js";
 /**
  * Image+Text Grid - Dynamic Input Extension
  *
- * Automatically adds new image/caption input pairs when you connect
- * to the last available image slot. Captions are input-only (connectable).
+ * Adds image/caption input pairs dynamically.
+ * All inputs are connectable slots - no text widgets.
  */
 app.registerExtension({
     name: "Trent.ImageTextGrid",
@@ -15,182 +15,160 @@ app.registerExtension({
         }
 
         /**
-         * Get all image input indices currently on the node
+         * Check if an input with given name exists
          */
-        const getImageInputIndices = () => {
-            const indices = [];
-            for (const input of node.inputs || []) {
-                const match = input.name.match(/^image_(\d+)$/);
-                if (match) {
-                    indices.push(parseInt(match[1]));
-                }
-            }
-            return indices.sort((a, b) => a - b);
+        const hasInput = (name) => {
+            return node.inputs?.some(i => i.name === name);
         };
 
         /**
-         * Check if an image input at given index is connected
+         * Check if an input is connected
          */
-        const isInputConnected = (index) => {
-            const input = node.inputs?.find(i => i.name === `image_${index}`);
+        const isConnected = (name) => {
+            const input = node.inputs?.find(i => i.name === name);
             return input && input.link !== null;
         };
 
         /**
-         * Add a new image input slot at specific index
+         * Get the highest image index currently on the node
          */
-        const addImageInput = (index) => {
-            const inputName = `image_${index}`;
-
-            if (node.inputs?.find(i => i.name === inputName)) {
-                return false;
+        const getMaxImageIndex = () => {
+            let max = 0;
+            for (const input of node.inputs || []) {
+                const match = input.name.match(/^image_(\d+)$/);
+                if (match) {
+                    max = Math.max(max, parseInt(match[1]));
+                }
             }
-
-            node.addInput(inputName, "IMAGE");
-            return true;
+            return max;
         };
 
         /**
-         * Add a new caption input slot at specific index
+         * Add an image/caption pair at given index
          */
-        const addCaptionInput = (index) => {
-            const inputName = `caption_${index}`;
-
-            if (node.inputs?.find(i => i.name === inputName)) {
-                return false;
-            }
-
-            node.addInput(inputName, "STRING");
-            return true;
-        };
-
-        /**
-         * Remove an image input and its caption input by index
-         */
-        const removeInputPair = (index) => {
+        const addPair = (index) => {
             const imageName = `image_${index}`;
             const captionName = `caption_${index}`;
 
-            // Remove image input
-            const imageIdx = node.inputs?.findIndex(i => i.name === imageName);
-            if (imageIdx >= 0) {
-                const input = node.inputs[imageIdx];
-                if (input.link !== null) {
-                    app.graph.removeLink(input.link);
-                }
-                node.removeInput(imageIdx);
+            if (!hasInput(imageName)) {
+                node.addInput(imageName, "IMAGE");
             }
-
-            // Remove caption input
-            const captionIdx = node.inputs?.findIndex(i => i.name === captionName);
-            if (captionIdx >= 0) {
-                const input = node.inputs[captionIdx];
-                if (input.link !== null) {
-                    app.graph.removeLink(input.link);
-                }
-                node.removeInput(captionIdx);
+            if (!hasInput(captionName)) {
+                node.addInput(captionName, "STRING");
             }
         };
 
         /**
-         * Reorder inputs so they appear as image_1, caption_1, image_2, caption_2...
+         * Remove an image/caption pair at given index
+         */
+        const removePair = (index) => {
+            const imageName = `image_${index}`;
+            const captionName = `caption_${index}`;
+
+            // Remove caption first (higher index after image)
+            let captionIdx = node.inputs?.findIndex(i => i.name === captionName);
+            if (captionIdx >= 0) {
+                if (node.inputs[captionIdx].link !== null) {
+                    app.graph.removeLink(node.inputs[captionIdx].link);
+                }
+                node.removeInput(captionIdx);
+            }
+
+            // Remove image
+            let imageIdx = node.inputs?.findIndex(i => i.name === imageName);
+            if (imageIdx >= 0) {
+                if (node.inputs[imageIdx].link !== null) {
+                    app.graph.removeLink(node.inputs[imageIdx].link);
+                }
+                node.removeInput(imageIdx);
+            }
+        };
+
+        /**
+         * Reorder inputs: image_1, caption_1, image_2, caption_2, ...
          */
         const reorderInputs = () => {
-            if (!node.inputs) return;
+            if (!node.inputs || node.inputs.length === 0) return;
 
-            const imageInputs = [];
-            const captionInputs = [];
-            const otherInputs = [];
+            // Separate dynamic inputs from others
+            const pairs = new Map(); // index -> {image, caption}
+            const others = [];
 
             for (const input of node.inputs) {
                 const imageMatch = input.name.match(/^image_(\d+)$/);
                 const captionMatch = input.name.match(/^caption_(\d+)$/);
 
                 if (imageMatch) {
-                    imageInputs.push({
-                        input,
-                        index: parseInt(imageMatch[1])
-                    });
+                    const idx = parseInt(imageMatch[1]);
+                    if (!pairs.has(idx)) pairs.set(idx, {});
+                    pairs.get(idx).image = input;
                 } else if (captionMatch) {
-                    captionInputs.push({
-                        input,
-                        index: parseInt(captionMatch[1])
-                    });
+                    const idx = parseInt(captionMatch[1]);
+                    if (!pairs.has(idx)) pairs.set(idx, {});
+                    pairs.get(idx).caption = input;
                 } else {
-                    otherInputs.push(input);
+                    others.push(input);
                 }
             }
 
-            // Sort by index
-            imageInputs.sort((a, b) => a.index - b.index);
-            captionInputs.sort((a, b) => a.index - b.index);
+            // Sort indices
+            const sortedIndices = [...pairs.keys()].sort((a, b) => a - b);
 
-            // Rebuild inputs array: other inputs first, then pairs
+            // Rebuild inputs array
             node.inputs.length = 0;
-            node.inputs.push(...otherInputs);
 
-            // Interleave image and caption inputs
-            const indices = [
-                ...new Set([
-                    ...imageInputs.map(i => i.index),
-                    ...captionInputs.map(i => i.index)
-                ])
-            ].sort((a, b) => a - b);
-
-            for (const idx of indices) {
-                const img = imageInputs.find(i => i.index === idx);
-                const cap = captionInputs.find(i => i.index === idx);
-                if (img) node.inputs.push(img.input);
-                if (cap) node.inputs.push(cap.input);
+            // Add pairs in order: image_N, caption_N
+            for (const idx of sortedIndices) {
+                const pair = pairs.get(idx);
+                if (pair.image) node.inputs.push(pair.image);
+                if (pair.caption) node.inputs.push(pair.caption);
             }
+
+            // Add other inputs at the end
+            node.inputs.push(...others);
         };
 
         /**
-         * Main function to update dynamic inputs based on connection state
+         * Update dynamic inputs based on connections
          */
-        const updateDynamicInputs = () => {
-            const indices = getImageInputIndices();
+        const updateInputs = () => {
+            const maxIdx = getMaxImageIndex();
 
-            if (indices.length === 0) {
-                addImageInput(1);
-                addCaptionInput(1);
+            // Always have at least pair 1
+            if (maxIdx === 0) {
+                addPair(1);
                 reorderInputs();
                 node.setSize(node.computeSize());
                 return;
             }
 
-            // Ensure all image inputs have corresponding caption inputs
-            for (const idx of indices) {
-                const captionExists = node.inputs?.find(
-                    i => i.name === `caption_${idx}`
-                );
-                if (!captionExists) {
-                    addCaptionInput(idx);
+            // Ensure all pairs exist
+            for (let i = 1; i <= maxIdx; i++) {
+                addPair(i);
+            }
+
+            // Find highest connected image
+            let highestConnected = 0;
+            for (let i = 1; i <= maxIdx; i++) {
+                if (isConnected(`image_${i}`)) {
+                    highestConnected = i;
                 }
             }
 
-            const connectedIndices = indices.filter(i => isInputConnected(i));
-            const unconnectedIndices = indices.filter(i => !isInputConnected(i));
-            const maxIndex = Math.max(...indices);
-
-            // If the highest input is connected, add a new pair
-            if (isInputConnected(maxIndex)) {
-                addImageInput(maxIndex + 1);
-                addCaptionInput(maxIndex + 1);
+            // If highest index is connected, add next pair
+            if (isConnected(`image_${maxIdx}`)) {
+                addPair(maxIdx + 1);
             }
 
-            // Remove extra unconnected pairs (keep only one empty slot)
-            const maxConnectedIndex = connectedIndices.length > 0
-                ? Math.max(...connectedIndices)
-                : 0;
-            const sortedUnconnected = [...unconnectedIndices].sort(
-                (a, b) => b - a
-            );
-
-            for (let i = 1; i < sortedUnconnected.length; i++) {
-                const idx = sortedUnconnected[i];
-                if (idx > maxConnectedIndex) {
-                    removeInputPair(idx);
+            // Remove trailing empty pairs (keep one empty)
+            const newMax = getMaxImageIndex();
+            let emptyCount = 0;
+            for (let i = newMax; i > highestConnected; i--) {
+                if (!isConnected(`image_${i}`)) {
+                    emptyCount++;
+                    if (emptyCount > 1) {
+                        removePair(i);
+                    }
                 }
             }
 
@@ -198,60 +176,63 @@ app.registerExtension({
             node.setSize(node.computeSize());
         };
 
-        // Hook into connection changes
-        const originalOnConnectionsChange = node.onConnectionsChange;
-        node.onConnectionsChange = function(
-            type, slotIndex, isConnected, link, ioSlot
-        ) {
-            if (originalOnConnectionsChange) {
-                originalOnConnectionsChange.apply(this, arguments);
-            }
+        // Remove any caption widgets that might exist
+        const removeWidgets = () => {
+            if (!node.widgets) return;
+            node.widgets = node.widgets.filter(w => {
+                return !w.name.match(/^caption_\d+$/);
+            });
+        };
 
-            // Type 1 = input connections
-            if (type === 1) {
-                setTimeout(updateDynamicInputs, 50);
+        // Hook connection changes
+        const origOnConnectionsChange = node.onConnectionsChange;
+        node.onConnectionsChange = function(type, slot, connected, link, io) {
+            if (origOnConnectionsChange) {
+                origOnConnectionsChange.apply(this, arguments);
+            }
+            if (type === 1) { // Input
+                removeWidgets();
+                setTimeout(updateInputs, 50);
             }
         };
 
-        // Hook into configure for loading saved workflows
-        const originalOnConfigure = node.onConfigure;
+        // Hook configure for loading workflows
+        const origOnConfigure = node.onConfigure;
         node.onConfigure = function(config) {
-            if (originalOnConfigure) {
-                originalOnConfigure.apply(this, arguments);
+            if (origOnConfigure) {
+                origOnConfigure.apply(this, arguments);
             }
 
+            // Add pairs for any saved inputs
             if (config.inputs) {
+                const indices = new Set();
                 for (const input of config.inputs) {
-                    const imageMatch = input.name.match(/^image_(\d+)$/);
-                    if (imageMatch) {
-                        const idx = parseInt(imageMatch[1]);
-                        addImageInput(idx);
-                        addCaptionInput(idx);
+                    const match = input.name.match(/^image_(\d+)$/);
+                    if (match) {
+                        indices.add(parseInt(match[1]));
                     }
+                }
+                for (const idx of indices) {
+                    addPair(idx);
                 }
             }
 
             setTimeout(() => {
-                updateDynamicInputs();
+                removeWidgets();
+                updateInputs();
             }, 100);
         };
 
         // Initial setup
         setTimeout(() => {
-            const indices = getImageInputIndices();
-            if (indices.length === 0) {
-                addImageInput(1);
+            removeWidgets();
+            if (!hasInput("image_1")) {
+                addPair(1);
+            } else if (!hasInput("caption_1")) {
+                // image_1 exists but caption_1 doesn't
+                node.addInput("caption_1", "STRING");
             }
-
-            // Ensure caption_1 input exists
-            const caption1Exists = node.inputs?.find(
-                i => i.name === "caption_1"
-            );
-            if (!caption1Exists) {
-                addCaptionInput(1);
-            }
-
-            updateDynamicInputs();
+            updateInputs();
         }, 100);
     },
 });
