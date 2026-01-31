@@ -6,13 +6,9 @@ Uses lazy evaluation to avoid evaluating later inputs once a truthy is found.
 """
 from typing import Any, Dict, List, Tuple
 
-from comfy_execution.graph_utils import ExecutionBlocker
+from comfy_execution.graph import ExecutionBlocker
 
-# Import from parent package utils
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.truthiness import is_truthy
+from ..utils.truthiness import is_truthy
 
 
 class FirstValid:
