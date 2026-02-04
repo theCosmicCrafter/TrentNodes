@@ -297,37 +297,44 @@ app.registerExtension({
         
         /**
          * Main function to update dynamic inputs based on connection state
+         *
+         * Logic:
+         * - Slots stay in fixed positions (image_1, image_2, image_3, etc.)
+         * - Always keep exactly one empty slot at the bottom
+         * - Only add a new slot when the bottom-most slot gets connected
+         * - Only remove consecutive empty slots from the bottom (keep one)
+         * - Middle slots can be empty - they stay visible without frame widgets
          */
         const updateDynamicInputs = () => {
             const indices = getImageInputIndices();
-            
+
             if (indices.length === 0) {
                 addImageInput(1);
                 return;
             }
-            
-            // Find connected and unconnected inputs
-            const connectedIndices = indices.filter(i => isInputConnected(i));
-            const unconnectedIndices = indices.filter(i => !isInputConnected(i));
-            
-            const maxIndex = Math.max(...indices);
-            
-            // If the highest input is connected, add a new one
+
+            let maxIndex = Math.max(...indices);
+
+            // If the bottom-most input is connected, add a new empty slot
             if (isInputConnected(maxIndex)) {
                 addImageInput(maxIndex + 1);
-            }
-            
-            // Remove extra unconnected inputs (keep only one empty slot at the end)
-            const maxConnectedIndex = connectedIndices.length > 0 ? Math.max(...connectedIndices) : 0;
-            const sortedUnconnected = [...unconnectedIndices].sort((a, b) => b - a);
-            
-            for (let i = 1; i < sortedUnconnected.length; i++) {
-                const idx = sortedUnconnected[i];
-                if (idx > maxConnectedIndex) {
-                    removeImageInput(idx);
+            } else {
+                // Remove consecutive empty slots from the bottom, keeping one
+                // Example: [connected, empty, empty, empty] -> [connected, empty]
+                while (maxIndex > 1) {
+                    const secondToLast = maxIndex - 1;
+                    // If both bottom and second-to-bottom are empty, remove bottom
+                    if (!isInputConnected(maxIndex) && !isInputConnected(secondToLast)) {
+                        removeImageInput(maxIndex);
+                        maxIndex = secondToLast;
+                    } else {
+                        // Either bottom is connected or second-to-last is connected
+                        // Stop removing
+                        break;
+                    }
                 }
             }
-            
+
             // Update widget visibility
             updateWidgetVisibility();
 
