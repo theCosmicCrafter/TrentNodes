@@ -49,11 +49,11 @@ GPU-accelerated frame duplication to slow down image, mask, or latent batches. S
 
 ### 🎞️ Animation/Timing (2 nodes)
 
-**Animation Duplicate Frame Processor**
-Analyzes animation sequences to detect duplicate frames and timing patterns. Identifies frame holds and optimizes animation timing for smoother playback.
+**Enhanced Animation Timing Processor**
+Analyzes animation sequences to detect duplicate frames and replaces them with gray frames for video generation workflows. Features multiple similarity detection methods (hybrid, SSIM, histogram, perceptual), configurable preservation options for sequence first/last frames, and **keyframe alignment** that automatically inserts padding frames to ensure keyframes land on multiples of 4 (or any configurable multiple) for glitch-free video generation. Outputs include processed frames, duplicate mask, timing report, and removal indices for the companion Frame Remover node.
 
 **Animation Frame Remover**
-Removes duplicate or unwanted frames from animation sequences based on configurable thresholds. Cleans up animation batches for efficient processing.
+Removes padding frames inserted by the Enhanced Animation Timing Processor. Connect the `removal_indices` output from the processor to automatically strip the temporary padding frames after video generation, returning to the original frame count while preserving the generated content.
 
 ### 🖼️ Trent/Image (6 nodes)
 
