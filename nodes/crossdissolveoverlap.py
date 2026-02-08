@@ -1,7 +1,8 @@
 import torch
 import torch.nn.functional as F
-import numpy as np
 from typing import Tuple, Optional
+
+from ..utils.easing import apply_easing
 
 class CrossDissolveOverlap:
     """
@@ -105,40 +106,6 @@ class CrossDissolveOverlap:
             images_b = images_b.permute(0, 2, 3, 1)
         
         return images_a, images_b
-    
-    def get_alpha_curve(self, t, curve_type):
-        """
-        Generate alpha values based on curve type.
-        Added more curve types and improved mathematical accuracy.
-        """
-        # Clamp t to ensure it's always between 0 and 1
-        t = torch.clamp(t, 0.0, 1.0)
-        
-        if curve_type == "linear":
-            return t
-        elif curve_type == "ease_in":
-            return t * t
-        elif curve_type == "ease_out":
-            return 1 - (1 - t) * (1 - t)
-        elif curve_type == "ease_in_out":
-            return 3 * t * t - 2 * t * t * t
-        elif curve_type == "smooth":
-            return t * t * (3 - 2 * t)
-        elif curve_type == "bounce":
-            # Simple bounce effect - more dramatic at the end
-            return t * (2 - t)
-        elif curve_type == "elastic":
-            # Elastic effect with slight overshoot
-            if t == 0:
-                return torch.tensor(0.0)
-            elif t == 1:
-                return torch.tensor(1.0)
-            else:
-                p = 0.3
-                s = p / 4
-                return 1 - torch.pow(2, -10 * t) * torch.sin((t - s) * (2 * torch.pi) / p)
-        else:
-            return t
     
     def apply_blend_mode(self, img_a: torch.Tensor, img_b: torch.Tensor, alpha: float, blend_mode: str) -> torch.Tensor:
         """
@@ -276,7 +243,7 @@ class CrossDissolveOverlap:
                     if isinstance(blend_progress, (int, float)):
                         blend_progress = torch.tensor(blend_progress, dtype=torch.float32)
                     
-                    alpha = self.get_alpha_curve(blend_progress, dissolve_curve)
+                    alpha = apply_easing(blend_progress, dissolve_curve)
                     
                     # Get the images to blend
                     img_a = images_a[a_idx]
