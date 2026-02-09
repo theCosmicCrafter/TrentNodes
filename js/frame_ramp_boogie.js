@@ -7,25 +7,11 @@ import { app } from "/scripts/app.js";
  * - Hides irrelevant controls based on current settings
  * - Live easing curve preview canvas that updates in real-time
  * - Bezier control point visualization with handle lines
+ * - Canvas auto-resizes with the node
+ *
+ * Widget hiding uses the DA3 pattern (array removal) which
+ * works reliably with ComfyUI's new frontend (v1.38+).
  */
-
-// ── Widget hide/show helpers ──────────────────────────────
-
-function hideWidget(node, widget) {
-    if (!widget || widget._hidden) return;
-    widget._hidden = true;
-    widget._origType = widget.type;
-    widget._origComputeSize = widget.computeSize;
-    widget.type = "trent_hidden";
-    widget.computeSize = () => [0, -4];
-}
-
-function showWidget(node, widget) {
-    if (!widget || !widget._hidden) return;
-    widget._hidden = false;
-    widget.type = widget._origType;
-    widget.computeSize = widget._origComputeSize;
-}
 
 // ── Easing math (ported from utils/easing.py) ─────────────
 
@@ -38,7 +24,6 @@ const EASING_FNS = {
 };
 
 function cubicBezier(t, p1x, p1y, p2x, p2y) {
-    // Newton-Raphson: solve B_x(u) = t, then evaluate B_y(u)
     let u = t;
     for (let i = 0; i < 8; i++) {
         const u2 = u * u;
@@ -54,7 +39,10 @@ function cubicBezier(t, p1x, p1y, p2x, p2y) {
             3.0 * p2x * (2.0 * u - 3.0 * u2) +
             3.0 * u2;
         dbx = Math.max(dbx, 1e-7);
-        u = Math.max(0.0, Math.min(1.0, u - (bx - t) / dbx));
+        u = Math.max(
+            0.0,
+            Math.min(1.0, u - (bx - t) / dbx)
+        );
     }
     const u2 = u * u;
     const u3 = u2 * u;
@@ -95,6 +83,8 @@ function drawCurve(canvas, easing, p1x, p1y, p2x, p2y) {
     const pad = 14;
     const gw = w - 2 * pad;
     const gh = h - 2 * pad;
+
+    if (gw <= 0 || gh <= 0) return;
 
     ctx.save();
     ctx.scale(dpr, dpr);
@@ -143,10 +133,6 @@ function drawCurve(canvas, easing, p1x, p1y, p2x, p2y) {
 
     // Bezier control point handles (behind curve)
     if (easing === "cubic_bezier") {
-        const sx = pad;
-        const sy = pad + gh;
-        const ex = pad + gw;
-        const ey = pad;
         const cp1x = pad + p1x * gw;
         const cp1y = pad + gh - p1y * gh;
         const cp2x = pad + p2x * gw;
@@ -156,12 +142,12 @@ function drawCurve(canvas, easing, p1x, p1y, p2x, p2y) {
         ctx.lineWidth = 1;
         ctx.setLineDash([3, 3]);
         ctx.beginPath();
-        ctx.moveTo(sx, sy);
+        ctx.moveTo(pad, pad + gh);
         ctx.lineTo(cp1x, cp1y);
         ctx.stroke();
         ctx.beginPath();
         ctx.moveTo(cp2x, cp2y);
-        ctx.lineTo(ex, ey);
+        ctx.lineTo(pad + gw, pad);
         ctx.stroke();
         ctx.setLineDash([]);
     }
@@ -174,7 +160,9 @@ function drawCurve(canvas, easing, p1x, p1y, p2x, p2y) {
     const steps = 80;
     for (let i = 0; i <= steps; i++) {
         const t = i / steps;
-        const v = evaluateEasing(t, easing, p1x, p1y, p2x, p2y);
+        const v = evaluateEasing(
+            t, easing, p1x, p1y, p2x, p2y
+        );
         const x = pad + t * gw;
         const y = pad + gh - v * gh;
         if (i === 0) {
@@ -200,7 +188,6 @@ function drawCurve(canvas, easing, p1x, p1y, p2x, p2y) {
         ctx.arc(cp2x, cp2y, 4, 0, 2 * Math.PI);
         ctx.fill();
 
-        // Labels
         ctx.fillStyle = "#ff6e40";
         ctx.font = "bold 8px sans-serif";
         ctx.textAlign = "center";
@@ -249,8 +236,24 @@ app.registerExtension({
             return;
         }
 
+        // ── Store widget references ──────────────────
+        // Required widgets stay in the array; optional
+        // widgets get removed/re-added by visibility
+        // logic. Direct refs let us access values and
+        // hook callbacks regardless of array membership.
+
         const findWidget = (name) =>
             node.widgets?.find((w) => w.name === name);
+
+        const optionalNames = [
+            "region_size", "bezier_preset",
+            "p1_x", "p1_y", "p2_x", "p2_y",
+        ];
+        const optRefs = {};
+        for (const name of optionalNames) {
+            const w = findWidget(name);
+            if (w) optRefs[name] = w;
+        }
 
         // ── Create curve preview widget ───────────────
 
@@ -258,13 +261,13 @@ app.registerExtension({
         container.style.cssText = `
             width: 100%;
             box-sizing: border-box;
+            overflow: hidden;
         `;
 
         const canvas = document.createElement("canvas");
         const dpr = window.devicePixelRatio || 1;
-        const canvasW = 220;
         const canvasH = 110;
-        canvas.width = canvasW * dpr;
+        canvas.width = 220 * dpr;
         canvas.height = canvasH * dpr;
         canvas.style.cssText = `
             display: block;
@@ -279,119 +282,170 @@ app.registerExtension({
             "customCanvas",
             container
         );
-        previewWidget.computeSize = () => [220, canvasH + 8];
-        previewWidget.serializeValue = () => undefined;
-
-        // ── Hide all optional widgets immediately ────
-        // Prevents flash of bezier controls on node
-        // creation. updateVisibility will show the
-        // correct ones after a short delay.
-
-        const allOptional = [
-            "region_size", "bezier_preset",
-            "p1_x", "p1_y", "p2_x", "p2_y",
+        previewWidget.computeSize = () => [
+            220, canvasH + 8,
         ];
-        for (const name of allOptional) {
-            const w = findWidget(name);
-            if (w) hideWidget(node, w);
-        }
+        previewWidget.serializeValue = () => undefined;
 
         // ── Curve redraw function ─────────────────────
 
         const redrawCurve = () => {
+            // Sync canvas pixel width with container
+            const rect =
+                container.getBoundingClientRect();
+            if (rect.width > 0) {
+                const pw = Math.round(rect.width * dpr);
+                if (canvas.width !== pw) {
+                    canvas.width = pw;
+                }
+            }
+
             const easing =
                 findWidget("easing")?.value || "linear";
             const preset =
-                findWidget("bezier_preset")?.value || "ease";
+                optRefs.bezier_preset?.value || "ease";
 
-            let p1x = findWidget("p1_x")?.value ?? 0.25;
-            let p1y = findWidget("p1_y")?.value ?? 0.1;
-            let p2x = findWidget("p2_x")?.value ?? 0.25;
-            let p2y = findWidget("p2_y")?.value ?? 1.0;
+            let p1x = optRefs.p1_x?.value ?? 0.25;
+            let p1y = optRefs.p1_y?.value ?? 0.1;
+            let p2x = optRefs.p2_x?.value ?? 0.25;
+            let p2y = optRefs.p2_y?.value ?? 1.0;
 
-            // Apply preset if not custom
             if (
                 easing === "cubic_bezier" &&
                 preset !== "custom" &&
                 BEZIER_PRESETS[preset]
             ) {
-                [p1x, p1y, p2x, p2y] = BEZIER_PRESETS[preset];
+                [p1x, p1y, p2x, p2y] =
+                    BEZIER_PRESETS[preset];
             }
 
             drawCurve(canvas, easing, p1x, p1y, p2x, p2y);
         };
 
+        // ── Resize observer for canvas ────────────────
+
+        const resizeObserver = new ResizeObserver(() => {
+            redrawCurve();
+        });
+        resizeObserver.observe(container);
+
         // ── Widget visibility logic ───────────────────
+        // Uses DA3 pattern: removes hidden widgets from
+        // node.widgets entirely so the frontend cannot
+        // render them. Re-inserts when they should show.
+
+        const optSet = new Set(Object.values(optRefs));
 
         const updateVisibility = () => {
-            const easing = findWidget("easing")?.value;
-            const region = findWidget("target_region")?.value;
-            const preset = findWidget("bezier_preset")?.value;
+            const easing =
+                findWidget("easing")?.value;
+            const region =
+                findWidget("target_region")?.value;
+            const preset =
+                optRefs.bezier_preset?.value;
 
-            const isBezier = easing === "cubic_bezier";
+            const isBezier =
+                easing === "cubic_bezier";
             const isCustom = preset === "custom";
-            const isFullBatch = region === "full_batch";
+            const isFullBatch =
+                region === "full_batch";
 
-            // bezier_preset: only when easing is cubic_bezier
-            const presetW = findWidget("bezier_preset");
-            if (isBezier) {
-                showWidget(node, presetW);
-            } else {
-                hideWidget(node, presetW);
+            // Build list of widgets that should show
+            // (in display order)
+            const toShow = [];
+            if (!isFullBatch && optRefs.region_size) {
+                toShow.push(optRefs.region_size);
+            }
+            if (isBezier && optRefs.bezier_preset) {
+                toShow.push(optRefs.bezier_preset);
+            }
+            if (isBezier && isCustom) {
+                if (optRefs.p1_x) toShow.push(optRefs.p1_x);
+                if (optRefs.p1_y) toShow.push(optRefs.p1_y);
+                if (optRefs.p2_x) toShow.push(optRefs.p2_x);
+                if (optRefs.p2_y) toShow.push(optRefs.p2_y);
             }
 
-            // p1/p2 sliders: only when bezier + custom
-            const sliders = ["p1_x", "p1_y", "p2_x", "p2_y"];
-            for (const name of sliders) {
-                const w = findWidget(name);
-                if (isBezier && isCustom) {
-                    showWidget(node, w);
-                } else {
-                    hideWidget(node, w);
-                }
+            // Remove ALL optional widgets from array
+            node.widgets = node.widgets.filter(
+                (w) => !optSet.has(w)
+            );
+
+            // Re-insert visible ones before preview
+            const pvIdx =
+                node.widgets.indexOf(previewWidget);
+            const insertAt =
+                pvIdx >= 0 ? pvIdx : node.widgets.length;
+
+            for (let i = 0; i < toShow.length; i++) {
+                node.widgets.splice(
+                    insertAt + i, 0, toShow[i]
+                );
             }
 
-            // region_size: only when not full_batch
-            const regionW = findWidget("region_size");
-            if (isFullBatch) {
-                hideWidget(node, regionW);
-            } else {
-                showWidget(node, regionW);
-            }
-
-            // Redraw curve preview
+            // Redraw curve
             redrawCurve();
 
-            node.setSize(node.computeSize());
-            app.graph.setDirtyCanvas(true, true);
+            // Resize node to fit (keep width, adjust
+            // height)
+            requestAnimationFrame(() => {
+                const newSize = node.computeSize();
+                node.setSize([
+                    node.size[0], newSize[1],
+                ]);
+                if (node.setDirtyCanvas) {
+                    node.setDirtyCanvas(true, true);
+                }
+                if (app.graph) {
+                    app.graph.setDirtyCanvas(true, true);
+                }
+            });
         };
 
         // ── Hook widget callbacks ─────────────────────
+        // Required widgets use findWidget (always in
+        // array). Optional widgets use stored refs.
 
-        const watchWidgets = [
-            "easing",
-            "target_region",
-            "bezier_preset",
-        ];
-        for (const name of watchWidgets) {
-            const widget = findWidget(name);
-            if (widget) {
-                const orig = widget.callback;
-                widget.callback = function (value) {
-                    if (orig) orig.apply(this, arguments);
+        const easingW = findWidget("easing");
+        if (easingW) {
+            const orig = easingW.callback;
+            easingW.callback = function (value) {
+                if (orig) orig.apply(this, arguments);
+                setTimeout(updateVisibility, 50);
+            };
+        }
+
+        const regionW = findWidget("target_region");
+        if (regionW) {
+            const orig = regionW.callback;
+            regionW.callback = function (value) {
+                if (orig) orig.apply(this, arguments);
+                setTimeout(updateVisibility, 50);
+            };
+        }
+
+        if (optRefs.bezier_preset) {
+            const orig = optRefs.bezier_preset.callback;
+            optRefs.bezier_preset.callback =
+                function (value) {
+                    if (orig) {
+                        orig.apply(this, arguments);
+                    }
                     setTimeout(updateVisibility, 50);
                 };
-            }
         }
 
         // Hook bezier sliders for live curve updates
-        const bezierSliders = ["p1_x", "p1_y", "p2_x", "p2_y"];
-        for (const name of bezierSliders) {
-            const widget = findWidget(name);
+        for (const name of [
+            "p1_x", "p1_y", "p2_x", "p2_y",
+        ]) {
+            const widget = optRefs[name];
             if (widget) {
                 const orig = widget.callback;
                 widget.callback = function (value) {
-                    if (orig) orig.apply(this, arguments);
+                    if (orig) {
+                        orig.apply(this, arguments);
+                    }
                     setTimeout(redrawCurve, 10);
                 };
             }
@@ -409,6 +463,8 @@ app.registerExtension({
 
         // ── Initial update ────────────────────────────
 
+        updateVisibility();
         setTimeout(updateVisibility, 100);
+        setTimeout(updateVisibility, 500);
     },
 });
