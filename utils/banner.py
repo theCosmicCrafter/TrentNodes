@@ -15,13 +15,11 @@ PALETTE = [196, 202, 208, 214, 220, 190, 154, 118, 82, 46, 51, 39, 27, 21]
 
 # ASCII art banner
 BANNER = r"""
- ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
-
-
-        T  R  E  N  T  N  O  D  E  S
-
-
- ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+  ______                __  _   __          __
+ /_  __/_______  ____  / /_/ | / /___  ____/ /__  _____
+  / / / ___/ _ \/ __ \/ __/  |/ / __ \/ __  / _ \/ ___/
+ / / / /  /  __/ / / / /_/ /|  / /_/ / /_/ /  __(__  )
+/_/ /_/   \___/_/ /_/\__/_/ |_/\____/\__,_/\___/____/
 """.rstrip("\n")
 
 
@@ -67,13 +65,16 @@ def print_banner(use_color: bool = True):
     Args:
         use_color: Whether to use rainbow colors
     """
-    for i, line in enumerate(BANNER.splitlines()):
+    white_on_black = "\033[97;40m"
+    for line in BANNER.splitlines():
         if not line:
             sys.stdout.write("\n")
             continue
         if use_color:
-            color = ansi256(PALETTE[i % len(PALETTE)])
-            sys.stdout.write(color + line + RESET + "\n")
+            padded = line.ljust(56)
+            sys.stdout.write(
+                white_on_black + padded + RESET + "\n"
+            )
         else:
             sys.stdout.write(line + "\n")
     sys.stdout.flush()
