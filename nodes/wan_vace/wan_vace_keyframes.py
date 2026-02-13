@@ -41,6 +41,14 @@ class WanVaceKeyframeBuilder:
                     "step": 8,
                     "tooltip": "Height for filler frames (used if no images connected)"
                 }),
+                "background_images": ("IMAGE", {
+                    "tooltip": (
+                        "Optional batch of images to use instead"
+                        " of gray for filler frames (e.g. a video"
+                        " or control sequence). Wraps if shorter"
+                        " than frame_count."
+                    ),
+                }),
                 "auto_spacing": ("BOOLEAN", {
                     "default": False,
                     "tooltip": "Automatically distribute keyframes evenly across the frame range"
@@ -75,7 +83,7 @@ class WanVaceKeyframeBuilder:
     RETURN_TYPES = ("IMAGE", "MASK")
     RETURN_NAMES = ("images", "masks")
     OUTPUT_TOOLTIPS = (
-        "Batch of frames: keyframes at specified positions, gray filler elsewhere",
+        "Batch of frames: keyframes at specified positions, background or gray filler elsewhere",
         "Batch of masks: 0 for keyframes (preserve), 1 for filler frames (generate)"
     )
     
@@ -93,6 +101,7 @@ class WanVaceKeyframeBuilder:
         frame_count: int,
         default_width: int = 832,
         default_height: int = 480,
+        background_images: torch.Tensor = None,
         unique_id: str = None,
         prompt: dict = None,
         **kwargs
@@ -148,6 +157,7 @@ class WanVaceKeyframeBuilder:
         print(f"[WanVaceKeyframeBuilder] Keyframes at positions: {sorted(keyframes.keys())}")
         
         # Determine output dimensions from first available keyframe
+        # or background images
         if keyframes:
             first_frame_idx = min(keyframes.keys())
             first_img = keyframes[first_frame_idx]
@@ -155,9 +165,18 @@ class WanVaceKeyframeBuilder:
             w = first_img.shape[2]
             c = first_img.shape[3] if len(first_img.shape) > 3 else 3
             device = first_img.device
+        elif background_images is not None:
+            h = background_images.shape[1]
+            w = background_images.shape[2]
+            c = (background_images.shape[3]
+                 if len(background_images.shape) > 3 else 3)
+            device = background_images.device
         else:
             h, w, c = default_height, default_width, 3
             device = torch.device('cpu')
+
+        bg_count = (background_images.shape[0]
+                    if background_images is not None else 0)
         
         # Always use float32 for consistent values
         dtype = torch.float32
@@ -201,7 +220,23 @@ class WanVaceKeyframeBuilder:
                 image_list.append(img)
                 mask_list.append(keyframe_mask.clone())  # mask=0 = preserve this keyframe
             else:
-                image_list.append(filler_frame.clone())
+                if bg_count > 0:
+                    bg_idx = frame_idx % bg_count
+                    bg = background_images[bg_idx:bg_idx + 1].to(
+                        dtype=torch.float32
+                    )
+                    if bg.shape[1] != h or bg.shape[2] != w:
+                        bg = bg.permute(0, 3, 1, 2)
+                        bg = torch.nn.functional.interpolate(
+                            bg,
+                            size=(h, w),
+                            mode='bilinear',
+                            align_corners=False,
+                        )
+                        bg = bg.permute(0, 2, 3, 1)
+                    image_list.append(bg)
+                else:
+                    image_list.append(filler_frame.clone())
                 mask_list.append(filler_mask.clone())    # mask=1 = generate this frame
         
         # Concatenate into batches
@@ -209,7 +244,8 @@ class WanVaceKeyframeBuilder:
         masks_out = torch.cat(mask_list, dim=0)
         
         print(f"[WanVaceKeyframeBuilder] Output shapes: images={images_out.shape}, masks={masks_out.shape}, dtype={images_out.dtype}")
-        print(f"[WanVaceKeyframeBuilder] Filler value: {FILLER_VALUE}, Keyframes: {len(keyframes)} (mask=0), Fillers: {frame_count - len(keyframes)} (mask=1)")
+        filler_src = f"background batch ({bg_count} frames)" if bg_count > 0 else f"gray ({FILLER_VALUE})"
+        print(f"[WanVaceKeyframeBuilder] Filler: {filler_src}, Keyframes: {len(keyframes)} (mask=0), Fillers: {frame_count - len(keyframes)} (mask=1)")
         
         return (images_out, masks_out)
 
